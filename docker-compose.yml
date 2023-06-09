@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  web:
+    build: .
+    environment:
+      DATABASE_HOST: database
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD_FILE: /run/secrets/db_password
+      DATABASE_DBNAME: rust-charge
+      RUST_CHARGE_SESSION_SECRET_FILE: /run/secrets/session_secret
+      RUST_CHARGE_LOG: rust_charge=info
+    depends_on:
+      database:
+        condition: service_healthy
+    secrets:
+      - db_password
+      - session_secret
+
+  database:
+    image: "postgres:14-bookworm"
+    environment:
+      POSTGRES_DB: rust-charge
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "--timeout",
+          "0",
+          "--dbname",
+          "rust-charge",
+          "--username",
+          "postgres",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+    secrets:
+      - db_password

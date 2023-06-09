@@ -1,0 +1,49 @@
+{
+  "name": "ui",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=3"
+  },
+  "source": "ui/ui.html",
+  "targets": {
+    "default": {
+      "distDir": "ui/dist",
+      "publicUrl": "/assets",
+      "engines": {
+        "browsers": "since 2023"
+      }
+    }
+  },
+  "devDependencies": {
+    "@parcel/compressor-brotli": "^2.9.3",
+    "@parcel/compressor-gzip": "^2.9.3",
+    "@parcel/config-default": "^2.9.3",
+    "@parcel/core": "^2.9.3",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.44.0",
+    "eslint-config-prettier": "^8.8.0",
+    "parcel": "^2.9.3",
+    "postcss": "^8.4.25",
+    "prettier": "^3.0.0",
+    "tailwindcss": "^3.3.2",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "@hotwired/stimulus": "^3.2.1",
+    "@hotwired/turbo": "^7.3.0",
+    "chart.js": "^4.3.0",
+    "chartjs-adapter-date-fns": "^3.0.0",
+    "date-fns": "^2.30.0",
+    "zod": "^3.21.4"
+  },
+  "scripts": {
+    "build": "parcel build",
+    "check": "tsc --noEmit",
+    "lint": "eslint ui",
+    "lint:fix": "pnpm lint --fix",
+    "fmt": "prettier --write ."
+  }
+}

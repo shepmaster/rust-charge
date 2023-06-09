@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  web:
+    ports:
+      - "80:80"
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  session_secret:
+    file: ./secrets/session_secret.txt

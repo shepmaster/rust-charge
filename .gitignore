@@ -1,0 +1,6 @@
+/.env*
+/.parcel-cache
+/node_modules
+/secrets
+/target
+/ui/dist
