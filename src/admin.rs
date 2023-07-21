@@ -129,7 +129,13 @@ impl<B> MakeSpan<B> for MethodUriAndRequest {
 
 impl maud::Render for WattHours {
     fn render(&self) -> Markup {
-        html! { (format!("{} Wh", self.0)) }
+        let (v, unit) = if self.0 >= 1000.0 {
+            (self.0 / 1000.0, "kWh")
+        } else {
+            (self.0, "Wh")
+        };
+
+        html! { (format!("{v:.2} {unit}")) }
     }
 }
 
@@ -960,6 +966,8 @@ async fn charge_point_usage(
         .await
         .unwrap();
 
+    let total = daily_usage.total();
+
     let path = PATH.charge_point(&name);
 
     let daily_usage_data = serde_json::to_string(&daily_usage).unwrap();
@@ -981,7 +989,12 @@ async fn charge_point_usage(
                         data-daily-usage-for-month-chart-value=(daily_usage_data)
                     {};
                 };
-                h1."text-base" { (month_year) };
+                h1."text-base" {
+                    (month_year);
+                    " (Total ";
+                    (total);
+                    ")";
+                };
             };
         }
     };

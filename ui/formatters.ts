@@ -1,3 +1,9 @@
+export function formatWattHours(wattHours: number) {
+  const [v, unit] =
+    wattHours >= 1000 ? [wattHours / 1000, "kWh"] : [wattHours, "Wh"];
+  return `${v.toFixed(2)} ${unit}`;
+}
+
 export function formatSecondsAsHMS(rawSeconds: number) {
   return formatDurationAsHMS(secondsToDuration(rawSeconds));
 }

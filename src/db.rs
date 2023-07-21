@@ -160,12 +160,22 @@ impl fmt::Display for RecentTransaction {
 }
 
 #[derive(
-    Debug, Copy, Clone, derive_more::AddAssign, derive_more::Sub, DieselNewType, Serialize,
+    Debug,
+    Copy,
+    Clone,
+    derive_more::Add,
+    derive_more::AddAssign,
+    derive_more::Sub,
+    derive_more::Sum,
+    DieselNewType,
+    Serialize,
 )]
 #[serde(transparent)]
 pub struct WattHours(pub f64);
 
 impl WattHours {
+    const ZERO: Self = WattHours(0.0);
+
     pub fn new_from_i64(value: i64) -> Self {
         WattHours(value as f64)
     }
@@ -1162,6 +1172,15 @@ fn transaction_relative_usages(
 #[derive(Debug, Default, Serialize)]
 pub struct DailyUsageForMonth {
     datasets: Option<[DataSet<DateTime<Utc>, WattHours>; 1]>,
+}
+
+impl DailyUsageForMonth {
+    pub fn total(&self) -> WattHours {
+        match &self.datasets {
+            Some(v) => v[0].data.iter().map(|d| d.y).sum(),
+            None => WattHours::ZERO,
+        }
+    }
 }
 
 sql_function! {

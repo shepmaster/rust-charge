@@ -11,7 +11,7 @@ import { z } from "zod";
 import "chartjs-adapter-date-fns";
 
 import { UpdateInlineEvent } from "./event";
-import { formatSecondsAsHMS } from "./formatters";
+import { formatSecondsAsHMS, formatWattHours } from "./formatters";
 
 export const missingColorPlugin = (() => {
   // From https://github.com/chartjs/Chart.js/blob/master/src/plugins/plugin.colors.ts
@@ -99,9 +99,18 @@ export const dateOnlyCategoryScale: ScaleOptions<"category"> = {
 };
 
 export const wattHoursScale: ScaleOptions<"linear"> = {
+  ticks: {
+    callback(tickValue) {
+      if (typeof tickValue === "string") {
+        return tickValue;
+      } else {
+        return formatWattHours(tickValue);
+      }
+    },
+  },
   title: {
     display: true,
-    text: "Watt-hours",
+    text: "Energy",
   },
 };
 
@@ -114,7 +123,7 @@ export const dateOnlyCategoryTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
   ctx.map((c) => formatDate(c.label));
 
 export const wattHourTooltip = <C extends OurTooltipItem>(ctx: C) =>
-  `${ctx.parsed.y.toFixed(3)} Wh`;
+  formatWattHours(ctx.parsed.y);
 
 interface MakeLoaderProps<S> {
   schema: S;
