@@ -1,10 +1,13 @@
 import { Application } from "@hotwired/stimulus";
 import * as Turbo from "@hotwired/turbo";
 
-import ChartController from "./controllers/chart_controller";
+import DailyUsageForMonthChartController from "./controllers/daily_usage_for_month_chart_controller";
+import DetectTimezoneController from "./controllers/detect_timezone_controller";
 import DurationController from "./controllers/duration_controller";
 import FlashNotificationController from "./controllers/flash_notification_controller";
+import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
 import RelativeTimestampController from "./controllers/relative_timestamp_controller";
+import RelativeUsageChartController from "./controllers/relative_usage_chart_controller";
 
 interface TurboEventMap {
   "turbo:before-stream-render": Turbo.TurboBeforeStreamRenderEvent;
@@ -43,7 +46,13 @@ Turbo.StreamActions["update-inline"] = function () {
 };
 
 window.Stimulus = Application.start();
-window.Stimulus.register("chart", ChartController);
+window.Stimulus.register(
+  "daily-usage-for-month-chart",
+  DailyUsageForMonthChartController,
+);
+window.Stimulus.register("detect-timezone", DetectTimezoneController);
 window.Stimulus.register("duration", DurationController);
 window.Stimulus.register("flash-notification", FlashNotificationController);
+window.Stimulus.register("infinite-carousel", InfiniteCarouselController);
 window.Stimulus.register("relative-timestamp", RelativeTimestampController);
+window.Stimulus.register("relative-usage-chart", RelativeUsageChartController);

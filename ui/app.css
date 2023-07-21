@@ -15,3 +15,7 @@
 }
 @tailwind components;
 @tailwind utilities;
+
+.loader {
+  background-image: url(data-url:./puff.svg);
+}

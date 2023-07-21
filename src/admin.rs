@@ -3,8 +3,9 @@ use axum::{
     extract::{FromRequestParts, Path, State},
     response::{sse, IntoResponse, Redirect, Sse},
     routing::{delete, get, post},
-    Form, Router,
+    Form, Router, TypedHeader,
 };
+use axum_extra::extract::{cookie::Cookie, CookieJar};
 use axum_sessions::{async_session, extractors::WritableSession, SessionLayer};
 use chrono::{DateTime, Utc};
 use futures::{Future, Stream, StreamExt as _};
@@ -23,13 +24,17 @@ use tower_http::{
 };
 use tracing::{info_span, warn};
 
+use self::my_headers::TurboFrame;
 use crate::{
     db::{ChargePoint, ChargePointOverview, Db, DbError, WattHours},
     ocpp, Backchannels, Event, EventBus,
 };
 
 const SESSION_ID_COOKIE_NAME: &str = "rust_charge_sid";
+const TIMEZONE_COOKIE_NAME: &str = "timezone";
 const X_REQUEST_ID_NAME: &str = "x-request-id";
+
+const DEFAULT_TIMEZONE: chrono_tz::Tz = chrono_tz::America::New_York;
 
 pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
     #[allow(unused_mut)]
@@ -46,6 +51,11 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             "/charge_points/:name/configuration",
             post(charge_point_configuration_update),
         )
+        .route("/charge_points/:name/usage", get(charge_point_usage))
+        .route(
+            "/charge_points/:name/usage/events",
+            get(charge_point_usage_events),
+        )
         .route(
             "/charge_points/:name/transaction",
             post(charge_point_transaction_create),
@@ -56,6 +66,8 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
         )
         .route("/charge_points/:name/trigger", post(charge_point_trigger))
         .route("/charge_points/:name/reset", post(charge_point_reset))
+        .route("/profile", get(profile))
+        .route("/profile", post(profile_update))
         .route("/shutdown", post(shutdown));
 
     #[cfg(feature = "fake-data")]
@@ -334,6 +346,8 @@ fn connected_gem<'a>(id: impl Into<Option<&'a str>>, connected: bool) -> Markup 
 }
 
 const BUTTON_CLASS: &str = "bg-sky-700 hover:bg-sky-600 text-slate-100 p-1 rounded-sm";
+const SMALL_BUTTON_CLASS: &str =
+    "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-sm text-xs";
 
 fn turbo_button(action: &str, label: &str) -> Markup {
     html! {
@@ -381,6 +395,9 @@ const CHARGE_POINT_GEM_ID: &str = "charge_point_gem";
 const CHARGE_POINT_CHART_ID: &str = "charge_point_chart";
 const CHARGE_POINT_TABLE_ID: &str = "charge_point_table";
 
+const CHART_CLASS: &str = "aspect-video min-w-full max-w-full";
+const LOADER_CLASS: &str = "loader aspect-square w-12 bg-center bg-no-repeat";
+
 const PATH: AdminPath = AdminPath;
 
 #[derive(Copy, Clone)]
@@ -395,6 +412,10 @@ impl fmt::Display for AdminPath {
 impl AdminPath {
     fn events(self) -> &'static str {
         "/admin/events"
+    }
+
+    fn profile(self) -> &'static str {
+        "/admin/profile"
     }
 
     fn shutdown(self) -> &'static str {
@@ -426,6 +447,22 @@ impl<'a> ChargePointPath<'a> {
 
     fn configuration(self) -> String {
         format!("{self}/configuration")
+    }
+
+    fn usage(self, params: Option<&UsageForm>) -> String {
+        let mut p = format!("{self}/usage");
+        if let Some(params) = params {
+            let link = serde_urlencoded::to_string(params).unwrap();
+            p.push('?');
+            p.push_str(&link);
+        }
+        p
+    }
+
+    fn usage_events(self) -> String {
+        let mut p = self.usage(None);
+        p.push_str("/events");
+        p
     }
 
     fn transaction(self) -> String {
@@ -558,14 +595,10 @@ async fn charge_point(
         (top_nav());
 
         div."p-1" {
-            (flashes(flash, flash_string_body))
+            (flashes(flash, flash_string_body));
 
             section {
-                h1."flex"."items-center"."gap-x-1" {
-                    "Charge Point ";
-                    (name);
-                    (overview_connected_gem(connected));
-                };
+                (charge_point_header(&name, connected));
 
                 section {
                     h2 { "Recent transactions" };
@@ -597,7 +630,10 @@ async fn charge_point(
                         button.(BUTTON_CLASS) type="submit" { "Trigger" };
                     };
 
-                    a href=(&path.configuration()) { "Configuration" };
+                    ul {
+                        li { a href=(&path.configuration()) { "Configuration" } };
+                        li { a href=(&path.usage(None)) { "Usage" } };
+                    };
 
                     form."flex"."space-x-1" action=(path.reset()) method="post" data-turbo="true" {
                         select.(BUTTON_CLASS) name="kind" {
@@ -644,7 +680,7 @@ async fn charge_point_events(
             use Event::*;
             let stream_item = match evt {
                 ChargePointConnectionChanged { name, connected } if name == cp_name => {
-                    let gem = overview_connected_gem(connected);
+                    let gem = charge_point_connected_gem(connected);
 
                     my_response::TurboStream::default().replace(CHARGE_POINT_GEM_ID, gem)
                 }
@@ -667,7 +703,17 @@ async fn charge_point_events(
     })
 }
 
-fn overview_connected_gem(connected: bool) -> Markup {
+fn charge_point_header(name: &str, connected: bool) -> Markup {
+    html! {
+        h1."flex"."items-center"."gap-x-1" {
+            "Charge Point ";
+            (name);
+            (charge_point_connected_gem(connected));
+        };
+    }
+}
+
+fn charge_point_connected_gem(connected: bool) -> Markup {
     connected_gem(CHARGE_POINT_GEM_ID, connected)
 }
 
@@ -675,10 +721,12 @@ fn overview_chart(overview: &ChargePointOverview) -> Markup {
     let comparison_data = serde_json::to_string(&overview.comparison).unwrap();
 
     html! {
-        canvas #(CHARGE_POINT_CHART_ID) ."w-full"
-            data-controller="chart"
-            data-chart-data-value=(comparison_data)
-        {};
+        div."relative".(CHART_CLASS) {
+            canvas #(CHARGE_POINT_CHART_ID)
+                data-controller="relative-usage-chart"
+                data-relative-usage-chart-data-value=(comparison_data)
+            {};
+        }
     }
 }
 
@@ -865,6 +913,178 @@ fn charge_point_configuration_flash(
     let flash = ChargePointConfigurationFlash([flash]);
     let path = PATH.charge_point(name);
     flash_responder.respond(flash, flash_string_body, &path.configuration())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UsageForm {
+    #[serde(default)]
+    day: Option<DateTime<Utc>>,
+    #[serde(default)]
+    direction: Option<UsageDirection>,
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum UsageDirection {
+    Prev,
+    Next,
+}
+
+impl UsageDirection {
+    fn move_by_month(self, day: DateTime<Utc>) -> DateTime<Utc> {
+        let month = chrono::Months::new(1);
+
+        match self {
+            UsageDirection::Prev => day - month,
+            UsageDirection::Next => day + month,
+        }
+    }
+}
+
+async fn charge_point_usage(
+    cookies: CookieJar,
+    Path(name): Path<String>,
+    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    State(db): State<Db>,
+    State(backchannels): State<Backchannels>,
+    Form(form): Form<UsageForm>,
+) -> Result<impl IntoResponse> {
+    let day = form.day.unwrap_or_else(Utc::now);
+
+    let connected = backchannels.has(&name);
+
+    let timezone = current_timezone(&cookies);
+
+    let daily_usage = db
+        .daily_usage_for_month(&name, day, timezone)
+        .await
+        .unwrap();
+
+    let path = PATH.charge_point(&name);
+
+    let daily_usage_data = serde_json::to_string(&daily_usage).unwrap();
+
+    // TODO: file issue that lazy + data-turbo-stream should send accepts header
+
+    let chart = || {
+        let month_year = day.format("%B %Y");
+
+        html! {
+            section
+                ."grow"."shrink-0"."min-w-full"."max-w-full"."snap-center"
+                ."grid"."justify-items-center"
+                data-infinite-carousel-target="slide"
+            {
+                div."relative".(CHART_CLASS) {
+                    canvas
+                        data-controller="daily-usage-for-month-chart"
+                        data-daily-usage-for-month-chart-value=(daily_usage_data)
+                    {};
+                };
+                h1."text-base" { (month_year) };
+            };
+        }
+    };
+
+    let make_placeholder = |day: DateTime<Utc>, direction: UsageDirection| {
+        let day = direction.move_by_month(day);
+
+        let src = path.usage(Some(&UsageForm {
+            day: Some(day),
+            direction: Some(direction),
+        }));
+
+        move || {
+            html! {
+                turbo-frame #(day)."hidden".(CHART_CLASS)."grid"."place-items-center" src=(src) loading="lazy" {
+                    div."grid"."justify-items-center" {
+                        span {
+                            "Loading ";
+                            (day);
+                        };
+                        div.(LOADER_CLASS) {};
+                    };
+                };
+            }
+        }
+    };
+
+    let [prev_placeholder, next_placeholder] =
+        [UsageDirection::Prev, UsageDirection::Next].map(|d| make_placeholder(day, d));
+
+    if turbo_frame_id.is_some() {
+        let stream = my_response::TurboStream::default();
+        let stream = match form.direction {
+            Some(UsageDirection::Prev) => stream.before(day, prev_placeholder()),
+            Some(UsageDirection::Next) => stream.after(day, next_placeholder()),
+            None => stream,
+        };
+        let stream = stream.replace(day, chart());
+
+        Ok(stream.into_response())
+    } else {
+        const NAV_BUTTON_CLASS: &str = "cursor-pointer p-2 bg-neutral-300";
+
+        Ok(page(html! {
+            (top_nav());
+
+            div."p-1" {
+                section {
+                    (charge_point_header(&name, connected));
+
+                    div."flex" data-controller="infinite-carousel" {
+                        button."hidden".(NAV_BUTTON_CLASS) data-infinite-carousel-target="prev" { "←" };
+
+                        div."grow"."flex"."flex-nowrap"."overflow-x-hidden"."snap-x" data-infinite-carousel-target="slides" {
+                            (prev_placeholder());
+                            (chart());
+                            (next_placeholder());
+                        }
+
+                        button."hidden".(NAV_BUTTON_CLASS) data-infinite-carousel-target="next" { "→" };
+                    };
+
+                    div {
+                        "Using ";
+                        b { (timezone) };
+                        " (";
+                        a href=(PATH.profile()) { "change" };
+                        ")";
+                    };
+                };
+            };
+
+
+            turbo-stream-source src=(path.usage_events());
+        }).into_response())
+    }
+}
+
+async fn charge_point_usage_events(
+    Path(name): Path<String>,
+    State(bus): State<EventBus>,
+) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>> {
+    let cp_name: Arc<str> = name.into();
+
+    stream_event_bus(bus, move |evt| {
+        let cp_name = cp_name.clone();
+
+        async move {
+            use Event::*;
+            let stream_item = match evt {
+                ChargePointConnectionChanged { name, connected } if name == cp_name => {
+                    let gem = charge_point_connected_gem(connected);
+
+                    my_response::TurboStream::default().replace(CHARGE_POINT_GEM_ID, gem)
+                }
+
+                // TODO: Maybe watch the sample events and notify that
+                // the graph may be out of date?
+                _ => return None,
+            };
+            Some(stream_item)
+        }
+    })
 }
 
 async fn charge_point_transaction_create(
@@ -1132,6 +1352,77 @@ fn charge_point_flash(
     flash_responder.respond(flash, flash_string_body, &path.index())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ProfileFlash([Flash<String>; 1]);
+
+impl AsRef<Flash<String>> for ProfileFlash {
+    fn as_ref(&self) -> &Flash<String> {
+        &self.0[0]
+    }
+}
+
+async fn profile(cookies: CookieJar, session: WritableSession) -> Markup {
+    let flash = FlashHash(session).get::<ChargePointFlash>();
+    let flash: &[_] = flash.as_ref().map_or(&[], |f| &f.0);
+    let timezone = current_timezone(&cookies);
+
+    page(html! {
+        (top_nav());
+
+        div."p-1" {
+            (flashes(flash, flash_string_body));
+
+            section {
+                h1 { "Configuration" };
+
+                form action=(PATH.profile()) method="post" {
+                    div."grid"."grid-cols-2"."gap-4" data-controller="detect-timezone" {
+                        div."flex"."gap-x-1" {
+                            label."font-bold" for="timezone" { "Timezone" };
+                            button."hidden".(SMALL_BUTTON_CLASS) data-detect-timezone-target="button" {
+                                "Select browser's timezone";
+                            };
+                        };
+                        select name="timezone" data-detect-timezone-target="select" {
+                            @for tz in chrono_tz::TZ_VARIANTS {
+                                option value=(tz) selected[timezone == tz] { (tz) };
+                            }
+                        };
+                    };
+
+                    button.(BUTTON_CLASS) type="submit" { "Submit" };
+                };
+            };
+        };
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ProfileUpdateForm {
+    timezone: chrono_tz::Tz,
+}
+
+async fn profile_update(
+    cookies: CookieJar,
+    flash_responder: FlashResponder,
+    Form(form): Form<ProfileUpdateForm>,
+) -> impl IntoResponse {
+    let cookies = cookies.add(Cookie::new(TIMEZONE_COOKIE_NAME, form.timezone.to_string()));
+    let flash = ProfileFlash([Flash::Success("Profile updated".into())]);
+
+    (
+        cookies,
+        flash_responder.respond(flash, flash_string_body, PATH.profile()),
+    )
+}
+
+fn current_timezone(cookies: &CookieJar) -> chrono_tz::Tz {
+    cookies
+        .get(TIMEZONE_COOKIE_NAME)
+        .and_then(|tz| tz.value().parse().ok())
+        .unwrap_or(DEFAULT_TIMEZONE)
+}
+
 async fn shutdown(State(token): State<CancellationToken>) -> Markup {
     token.cancel();
 
@@ -1217,6 +1508,38 @@ impl IntoResponse for Error {
     }
 }
 
+mod my_headers {
+    use axum::headers::{self, Header, HeaderName, HeaderValue};
+
+    #[derive(Debug)]
+    pub struct TurboFrame(pub String);
+
+    static TURBO_FRAME_NAME: HeaderName = HeaderName::from_static("turbo-frame");
+
+    impl Header for TurboFrame {
+        fn name() -> &'static HeaderName {
+            &TURBO_FRAME_NAME
+        }
+
+        fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
+        where
+            I: Iterator<Item = &'i HeaderValue>,
+        {
+            let v = values.next().ok_or_else(headers::Error::invalid)?;
+            let s = v.to_str().ok().ok_or_else(headers::Error::invalid)?;
+            Ok(Self(s.into()))
+        }
+
+        fn encode<E>(&self, values: &mut E)
+        where
+            E: Extend<HeaderValue>,
+        {
+            let value = HeaderValue::from_str(&self.0).ok();
+            values.extend(value);
+        }
+    }
+}
+
 mod my_response {
     use axum::{http::header, response::IntoResponse};
     use maud::{html, Markup};
@@ -1227,6 +1550,14 @@ mod my_response {
     impl TurboStream {
         pub fn into_string(self) -> String {
             self.0.into_string()
+        }
+
+        pub fn before(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("before", target, content)
+        }
+
+        pub fn after(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("after", target, content)
         }
 
         pub fn append(self, target: impl std::fmt::Display, content: Markup) -> Self {

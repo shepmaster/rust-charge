@@ -21,6 +21,9 @@
     "@parcel/compressor-gzip": "^2.9.3",
     "@parcel/config-default": "^2.9.3",
     "@parcel/core": "^2.9.3",
+    "@parcel/optimizer-data-url": "2.9.3",
+    "@parcel/optimizer-terser": "^2.9.3",
+    "@parcel/transformer-inline-string": "2.9.3",
     "@typescript-eslint/eslint-plugin": "^6.1.0",
     "@typescript-eslint/parser": "^6.1.0",
     "eslint": "^8.45.0",
@@ -37,9 +40,11 @@
     "chart.js": "^4.3.0",
     "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^2.30.0",
+    "stimulus-use": "^0.52.0",
     "zod": "^3.21.4"
   },
   "scripts": {
+    "watch": "parcel watch",
     "build": "parcel build",
     "check": "tsc --noEmit",
     "lint": "eslint ui",

@@ -6,5 +6,9 @@
       "@parcel/compressor-gzip",
       "@parcel/compressor-brotli"
     ]
+  },
+  "optimizers": {
+    // https://github.com/parcel-bundler/parcel/issues/9124
+    "*.js": ["@parcel/optimizer-terser"]
   }
 }

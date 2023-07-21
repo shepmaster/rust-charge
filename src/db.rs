@@ -42,6 +42,13 @@ enum DbCommand {
         tx: oneshot::Sender<QueryResult<ChargePointOverview>>,
     },
 
+    DailyUsageForMonth {
+        name: String,
+        day: DateTime<Utc>,
+        timezone: chrono_tz::Tz,
+        tx: oneshot::Sender<QueryResult<DailyUsageForMonth>>,
+    },
+
     CurrentTransaction {
         name: String,
         tx: oneshot::Sender<QueryResult<Option<TransactionId>>>,
@@ -152,7 +159,10 @@ impl fmt::Display for RecentTransaction {
     }
 }
 
-#[derive(Debug, Copy, Clone, derive_more::AddAssign, derive_more::Sub, DieselNewType)]
+#[derive(
+    Debug, Copy, Clone, derive_more::AddAssign, derive_more::Sub, DieselNewType, Serialize,
+)]
+#[serde(transparent)]
 pub struct WattHours(pub f64);
 
 impl WattHours {
@@ -237,6 +247,23 @@ impl Db {
         self.send(|tx| DbCommand::ChargePointOverview { name, tx })
             .await?
             .context(ChargePointOverviewSnafu)
+    }
+
+    pub(crate) async fn daily_usage_for_month(
+        &self,
+        name: impl Into<String>,
+        day: DateTime<Utc>,
+        timezone: chrono_tz::Tz,
+    ) -> DbResult<DailyUsageForMonth> {
+        let name = name.into();
+        self.send(|tx| DbCommand::DailyUsageForMonth {
+            name,
+            day,
+            timezone,
+            tx,
+        })
+        .await?
+        .context(DailyUsageForMonth2Snafu)
     }
 
     pub(crate) async fn current_transaction(
@@ -393,6 +420,11 @@ pub(crate) enum DbError {
     },
 
     // TODO RENAME
+    DailyUsageForMonth2 {
+        source: QueryError,
+    },
+
+    // TODO RENAME
     CurrentTransaction2 {
         source: QueryError,
     },
@@ -480,6 +512,19 @@ impl Task {
 
                 DbCommand::ChargePointOverview { name, tx } => {
                     let energy = db.transaction(|db| charge_point_overview(db, &name));
+                    tx.send(energy).ok(/* Don't care if receiver is gone */);
+                }
+
+                DbCommand::DailyUsageForMonth {
+                    name,
+                    day,
+                    timezone,
+                    tx,
+                } => {
+                    let energy = db
+                        .build_transaction()
+                        .read_only()
+                        .run(|db| daily_usage_for_month(db, &name, day, timezone));
                     tx.send(energy).ok(/* Don't care if receiver is gone */);
                 }
 
@@ -1114,8 +1159,177 @@ fn transaction_relative_usages(
     Ok(EnergyComparison { datasets })
 }
 
+#[derive(Debug, Default, Serialize)]
+pub struct DailyUsageForMonth {
+    datasets: Option<[DataSet<DateTime<Utc>, WattHours>; 1]>,
+}
+
+sql_function! {
+    fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
+}
+
+#[instrument(skip_all)]
+fn daily_usage_for_month(
+    db: &mut PgConnection,
+    name: &str,
+    day: DateTime<Utc>,
+    timezone: chrono_tz::Tz,
+) -> QueryResult<DailyUsageForMonth> {
+    #[derive(QueryableByName, FromSqlRow)]
+    struct DailyUsage {
+        #[diesel(sql_type = sql_types::Timestamptz)]
+        pub day: DateTime<Utc>,
+        #[diesel(sql_type = sql_types::Double)]
+        pub usage: WattHours,
+    }
+
+    let charge_point_id = charge_point_id_for_name(db, name)?;
+    let Some(charge_point_id) = charge_point_id else {
+        return Ok(Default::default());
+    };
+
+    let samples = db.transaction(|db| {
+        let timezone = timezone.to_string();
+        diesel::select(set_config("timezone", timezone, true)).trace().execute(db).context(DailyUsageForMonthTimezoneSnafu)?;
+
+        // This takes all the samples, splitting them when they cross the
+        // boundary between days, then sums up the usage by day in a
+        // calendar month.
+        //
+        // Could maybe add some pre-filtering of sample data by a
+        // loose date range. It needs to be a little beyond the month
+        // ranges in order to capture any transactions cross the
+        // boundary.
+        diesel::sql_query(squish!(
+            r#"
+            WITH
+
+            all_transactions AS (
+              SELECT
+                transaction_id,
+                charge_point_id
+              FROM current_transactions
+
+              UNION
+
+              SELECT
+                transaction_id,
+                charge_point_id
+              FROM complete_transactions
+            ),
+
+            our_samples AS (
+              SELECT samples.*
+              FROM samples
+              INNER JOIN all_transactions ON all_transactions.transaction_id = samples.transaction_id
+              WHERE all_transactions.charge_point_id = $1
+            ),
+
+            raw_sample_deltas AS (
+              SELECT
+                transaction_id,
+                LAG(sampled_at) OVER(w) AS prev_sampled_at,
+                sampled_at,
+                LAG(meter) OVER(w) AS prev_meter,
+                meter
+              FROM our_samples
+              WINDOW w AS (
+                PARTITION BY transaction_id
+                ORDER BY sampled_at
+              )
+            ),
+
+            sample_deltas AS (
+              SELECT
+                transaction_id,
+                prev_sampled_at,
+                sampled_at,
+                meter - prev_meter AS meter_delta
+              FROM raw_sample_deltas
+              WHERE prev_sampled_at IS NOT NULL
+              AND sampled_at <> prev_sampled_at
+            ),
+
+            sample_deltas_split_on_day_crossing AS (
+              SELECT *
+              FROM sample_deltas
+
+              JOIN LATERAL (
+                SELECT
+                  meter_delta / extract(epoch FROM (sampled_at - prev_sampled_at)) AS rate,
+                  generate_series(
+                    date_trunc('day', sample_deltas.prev_sampled_at),
+                    date_trunc('day', sample_deltas.sampled_at),
+                    '1 day'::interval
+                  ) AS day_start
+              ) l1 ON true
+
+              JOIN LATERAL (
+                SELECT
+                  greatest(sample_deltas.prev_sampled_at, day_start) AS effective_prev_sampled_at,
+                  least(sample_deltas.sampled_at, day_start + '1 day'::interval) AS effective_sampled_at
+              ) l2 ON true
+
+              JOIN LATERAL (
+                SELECT
+                  extract(epoch FROM effective_sampled_at - effective_prev_sampled_at) * rate AS effective_meter_delta
+              ) l3 ON true
+            ),
+
+            usage_by_day AS (
+              SELECT
+                day_start,
+                sum(effective_meter_delta) AS usage
+              FROM sample_deltas_split_on_day_crossing
+              GROUP BY day_start
+            ),
+
+            this_month AS (
+              SELECT
+                generate_series(
+                  date_trunc('month', $2),
+                  date_trunc('month', $2) + '1 month'::interval - '1 day'::interval,
+                  '1 day'::interval
+                ) AS day
+            ),
+
+            usage_this_month AS (
+              SELECT
+                this_month.day,
+                coalesce(usage_by_day.usage, 0) AS usage
+              FROM this_month
+              LEFT JOIN usage_by_day ON usage_by_day.day_start = this_month.day
+              ORDER BY day
+            )
+
+            SELECT * FROM usage_this_month
+            "#
+        ))
+            .bind::<sql_types::BigInt, _>(charge_point_id)
+            .bind::<sql_types::Timestamptz, _>(day)
+            .trace()
+            .get_results::<DailyUsage>(db)
+            .context(DailyUsageForMonthSnafu)
+    })?;
+
+    let datasets = Some([DataSet {
+        label: "Daily usage".into(),
+        data: samples
+            .into_iter()
+            .map(|s| DataPoint {
+                x: s.day,
+                y: s.usage,
+            })
+            .collect(),
+    }]);
+
+    Ok(DailyUsageForMonth { datasets })
+}
+
 #[derive(Debug, Snafu)]
 pub(crate) enum QueryError {
+    // This is used for multiple specific transactions -- should we
+    // split those up?
     #[snafu(context(false))]
     Transaction {
         source: diesel::result::Error,
@@ -1225,6 +1439,14 @@ pub(crate) enum QueryError {
     },
 
     RelativeUsages {
+        source: diesel::result::Error,
+    },
+
+    DailyUsageForMonthTimezone {
+        source: diesel::result::Error,
+    },
+
+    DailyUsageForMonth {
         source: diesel::result::Error,
     },
 }

@@ -20,6 +20,9 @@ dependencies:
   date-fns:
     specifier: ^2.30.0
     version: 2.30.0
+  stimulus-use:
+    specifier: ^0.52.0
+    version: 0.52.0(@hotwired/stimulus@3.2.1)(hotkeys-js@3.11.2)
   zod:
     specifier: ^3.21.4
     version: 3.21.4
@@ -37,6 +40,15 @@ devDependencies:
   '@parcel/core':
     specifier: ^2.9.3
     version: 2.9.3
+  '@parcel/optimizer-data-url':
+    specifier: 2.9.3
+    version: 2.9.3(@parcel/core@2.9.3)
+  '@parcel/optimizer-terser':
+    specifier: ^2.9.3
+    version: 2.9.3(@parcel/core@2.9.3)
+  '@parcel/transformer-inline-string':
+    specifier: 2.9.3
+    version: 2.9.3(@parcel/core@2.9.3)
   '@typescript-eslint/eslint-plugin':
     specifier: ^6.1.0
     version: 6.1.0(@typescript-eslint/parser@6.1.0)(eslint@8.45.0)(typescript@5.1.6)
@@ -188,6 +200,13 @@ packages:
   /@jridgewell/set-array@1.1.2:
     resolution: {integrity: sha512-xnkseuNADM0gt2bs+BvhO0p78Mk762YnZdsuzFV018NoG1Sj1SCQvpSqa7XUaTam5vAGasABV9qXASMKnFMwMw==}
     engines: {node: '>=6.0.0'}
+    dev: true
+
+  /@jridgewell/source-map@0.3.5:
+    resolution: {integrity: sha512-UTYAUj/wviwdsMfzoSJspJxbkH5o1snzwX0//0ENX1u/55kkZZkcTZP6u9bwKGkv+dkk9at4m1Cpt0uY80kcpQ==}
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.3
+      '@jridgewell/trace-mapping': 0.3.18
     dev: true
 
   /@jridgewell/sourcemap-codec@1.4.14:
@@ -585,6 +604,18 @@ packages:
       - '@parcel/core'
     dev: true
 
+  /@parcel/optimizer-data-url@2.9.3(@parcel/core@2.9.3):
+    resolution: {integrity: sha512-k8lOKLzgZ24JKOuyrNe5PptoH8GJ78AwnumG1xEOKZ77gZnUgdrn3XdjzE28ZqTI4LFkT3jApUiBKBmqnWDe7Q==}
+    engines: {node: '>= 12.0.0', parcel: ^2.9.3}
+    dependencies:
+      '@parcel/plugin': 2.9.3(@parcel/core@2.9.3)
+      '@parcel/utils': 2.9.3
+      isbinaryfile: 4.0.10
+      mime: 2.6.0
+    transitivePeerDependencies:
+      - '@parcel/core'
+    dev: true
+
   /@parcel/optimizer-htmlnano@2.9.3(@parcel/core@2.9.3)(postcss@8.4.27):
     resolution: {integrity: sha512-9g/KBck3c6DokmJfvJ5zpHFBiCSolaGrcsTGx8C3YPdCTVTI9P1TDCwUxvAr4LjpcIRSa82wlLCI+nF6sSgxKA==}
     engines: {node: '>= 12.0.0', parcel: ^2.9.3}
@@ -643,6 +674,20 @@ packages:
     transitivePeerDependencies:
       - '@parcel/core'
       - '@swc/helpers'
+    dev: true
+
+  /@parcel/optimizer-terser@2.9.3(@parcel/core@2.9.3):
+    resolution: {integrity: sha512-okVNWavTG7w8tYoTTcoOEi2PVvMkepHzWNTJPD83tMx6RkBpi8V9d1tgBBzfT+dJdC3gEEt5ve+WgH6uNjkI9g==}
+    engines: {node: '>= 12.0.0', parcel: ^2.9.3}
+    dependencies:
+      '@parcel/diagnostic': 2.9.3
+      '@parcel/plugin': 2.9.3(@parcel/core@2.9.3)
+      '@parcel/source-map': 2.1.1
+      '@parcel/utils': 2.9.3
+      nullthrows: 1.1.1
+      terser: 5.19.2
+    transitivePeerDependencies:
+      - '@parcel/core'
     dev: true
 
   /@parcel/package-manager@2.9.3(@parcel/core@2.9.3):
@@ -898,6 +943,15 @@ packages:
       '@parcel/utils': 2.9.3
       '@parcel/workers': 2.9.3(@parcel/core@2.9.3)
       nullthrows: 1.1.1
+    dev: true
+
+  /@parcel/transformer-inline-string@2.9.3(@parcel/core@2.9.3):
+    resolution: {integrity: sha512-IZNd0Ksl32psX1M41KbUc4BmvVSoLVnlpaMrh9C/l+piFSkDXWMnF0PONX/RcxYMBIwB2jYllheIKH54naeNaA==}
+    engines: {node: '>= 12.0.0', parcel: ^2.9.3}
+    dependencies:
+      '@parcel/plugin': 2.9.3(@parcel/core@2.9.3)
+    transitivePeerDependencies:
+      - '@parcel/core'
     dev: true
 
   /@parcel/transformer-js@2.9.3(@parcel/core@2.9.3):
@@ -1528,6 +1582,10 @@ packages:
       update-browserslist-db: 1.0.11(browserslist@4.21.9)
     dev: true
 
+  /buffer-from@1.1.2:
+    resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+    dev: true
+
   /callsites@3.1.0:
     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
     engines: {node: '>=6'}
@@ -1620,6 +1678,10 @@ packages:
 
   /color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
+    dev: true
+
+  /commander@2.20.3:
+    resolution: {integrity: sha512-GpVkmM8vF2vQUkj2LvZmD35JxeJOLCwJ9cUkugyk2nuhbv3+mJvpLYYt+0+USMxE+oj+ey/lJEnhZw75x/OMcQ==}
     dev: true
 
   /commander@4.1.1:
@@ -2073,6 +2135,10 @@ packages:
       function-bind: 1.1.1
     dev: true
 
+  /hotkeys-js@3.11.2:
+    resolution: {integrity: sha512-hLuR+wtvrVrVFHku5cud44cPXQf5ke+96TonRaGzlNSt22rh2LH65avLYFNsc+QpzMuOEQG/IxJT5mEop99rvg==}
+    dev: false
+
   /htmlnano@2.0.4(postcss@8.4.27)(svgo@2.8.0):
     resolution: {integrity: sha512-WGCkyGFwjKW1GeCBsPYacMvaMnZtFJ0zIRnC2NCddkA+IOEhTqskXrS7lep+3yYZw/nQ3dW1UAX4yA/GJyR8BA==}
     peerDependencies:
@@ -2188,6 +2254,11 @@ packages:
   /is-path-inside@3.0.3:
     resolution: {integrity: sha512-Fd4gABb+ycGAmKou8eMftCupSir5lRxqf4aD/vd0cD2qc4HL07OjCeuHMr8Ro4CoMaeCKDB0/ECBOVWjTwUvPQ==}
     engines: {node: '>=8'}
+    dev: true
+
+  /isbinaryfile@4.0.10:
+    resolution: {integrity: sha512-iHrqe5shvBUcFbmZq9zOQHBoeOhZJu6RQGrDpBgenUm/Am+F3JM2MgQj+rK3Z601fzrL5gLZWtAPH2OBaSVcyw==}
+    engines: {node: '>= 8.0.0'}
     dev: true
 
   /isexe@2.0.0:
@@ -2385,6 +2456,12 @@ packages:
     dependencies:
       braces: 3.0.2
       picomatch: 2.3.1
+    dev: true
+
+  /mime@2.6.0:
+    resolution: {integrity: sha512-USPkMeET31rOMiarsBNIHZKLGgvKc/LrjofAnBlOttf5ajRvqiRA8QsenbcooctK6d6Ts6aqZXBA+XbkKthiQg==}
+    engines: {node: '>=4.0.0'}
+    hasBin: true
     dev: true
 
   /minimatch@3.1.2:
@@ -2834,6 +2911,13 @@ packages:
     engines: {node: '>=0.10.0'}
     dev: true
 
+  /source-map-support@0.5.21:
+    resolution: {integrity: sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w==}
+    dependencies:
+      buffer-from: 1.1.2
+      source-map: 0.6.1
+    dev: true
+
   /source-map@0.6.1:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
@@ -2848,6 +2932,16 @@ packages:
     resolution: {integrity: sha512-ji9qxRnOVfcuLDySj9qzhGSEFVobyt1kIOSkj1qZzYLzq7Tos/oUUWvotUPQLlrsidqsK6tBH89Bc9kL5zHA6w==}
     deprecated: 'Modern JS already guarantees Array#sort() is a stable sort, so this library is deprecated. See the compatibility table on MDN: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort#browser_compatibility'
     dev: true
+
+  /stimulus-use@0.52.0(@hotwired/stimulus@3.2.1)(hotkeys-js@3.11.2):
+    resolution: {integrity: sha512-b2Z2krSSIqKvG9ncrjMlxbX3SYg9mgL0g/1Zc25jTZjTr0//wgg7szUi9G67amBs/yLqO12GAEnudybZgYNnjA==}
+    peerDependencies:
+      '@hotwired/stimulus': '>= 3'
+      hotkeys-js: '>= 3'
+    dependencies:
+      '@hotwired/stimulus': 3.2.1
+      hotkeys-js: 3.11.2
+    dev: false
 
   /strip-ansi@6.0.1:
     resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
@@ -2942,6 +3036,17 @@ packages:
   /term-size@2.2.1:
     resolution: {integrity: sha512-wK0Ri4fOGjv/XPy8SBHZChl8CM7uMc5VML7SqiQ0zG7+J5Vr+RMQDoHa2CNT6KHUnTGIXH34UDMkPzAUyapBZg==}
     engines: {node: '>=8'}
+    dev: true
+
+  /terser@5.19.2:
+    resolution: {integrity: sha512-qC5+dmecKJA4cpYxRa5aVkKehYsQKc+AHeKl0Oe62aYjBL8ZA33tTljktDHJSaxxMnbI5ZYw+o/S2DxxLu8OfA==}
+    engines: {node: '>=10'}
+    hasBin: true
+    dependencies:
+      '@jridgewell/source-map': 0.3.5
+      acorn: 8.10.0
+      commander: 2.20.3
+      source-map-support: 0.5.21
     dev: true
 
   /text-table@0.2.0:
