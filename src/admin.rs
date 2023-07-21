@@ -1,7 +1,6 @@
 use axum::{
     async_trait,
     extract::{FromRequestParts, Path, State},
-    http::header,
     response::{sse, IntoResponse, Redirect, Sse},
     routing::{delete, get, post},
     Form, Router,
@@ -283,22 +282,9 @@ impl FlashResponder {
         F: AsRef<Flash<T>> + Serialize,
     {
         match self {
-            FlashResponder::TurboStream => {
-                let stream = html! {
-                    turbo-stream action="append" target=(FLASHES_ID) {
-                        template { (flash_one(flash.as_ref(), flash_body)) };
-                    };
-                };
-
-                (
-                    [(
-                        header::CONTENT_TYPE,
-                        "text/vnd.turbo-stream.html; charset=utf-8",
-                    )],
-                    stream.into_string(),
-                )
-                    .into_response()
-            }
+            FlashResponder::TurboStream => my_response::TurboStream::default()
+                .append(FLASHES_ID, flash_one(flash.as_ref(), flash_body))
+                .into_response(),
 
             FlashResponder::Redirect(session) => {
                 FlashHash(session).set(flash);
@@ -512,11 +498,7 @@ async fn index_events(
                     let charge_points = db.list().await.unwrap();
                     let table = index_table(&charge_points);
 
-                    html! {
-                        turbo-stream action="replace" target=(INDEX_TABLE_ID) {
-                            template { (table) };
-                        };
-                    }
+                    my_response::TurboStream::default().replace(INDEX_TABLE_ID, table)
                 }
 
                 _ => return None,
@@ -664,11 +646,7 @@ async fn charge_point_events(
                 ChargePointConnectionChanged { name, connected } if name == cp_name => {
                     let gem = overview_connected_gem(connected);
 
-                    html! {
-                        turbo-stream action="replace" target=(CHARGE_POINT_GEM_ID) {
-                            template { (gem) };
-                        };
-                    }
+                    my_response::TurboStream::default().replace(CHARGE_POINT_GEM_ID, gem)
                 }
 
                 TransactionSampleAdded { name } if name == cp_name => {
@@ -677,15 +655,9 @@ async fn charge_point_events(
                     let chart = overview_chart(&overview);
                     let table = overview_summary_table(&overview);
 
-                    html! {
-                        turbo-stream action="update-inline" target=(CHARGE_POINT_CHART_ID) {
-                            template { (chart) };
-                        };
-
-                        turbo-stream action="replace" target=(CHARGE_POINT_TABLE_ID) {
-                            template { (table) };
-                        };
-                    }
+                    my_response::TurboStream::default()
+                        .update_inline(CHARGE_POINT_CHART_ID, chart)
+                        .replace(CHARGE_POINT_TABLE_ID, table)
                 }
 
                 _ => return None,
@@ -1177,7 +1149,7 @@ fn stream_event_bus<F, FFut>(
 where
     F: FnMut(Event) -> FFut,
     F: 'static + Send,
-    FFut: Future<Output = Option<Markup>>,
+    FFut: Future<Output = Option<my_response::TurboStream>>,
     FFut: 'static + Send,
 {
     let stream = bus
@@ -1242,5 +1214,56 @@ impl IntoResponse for Error {
         });
 
         (axum::http::StatusCode::INTERNAL_SERVER_ERROR, page).into_response()
+    }
+}
+
+mod my_response {
+    use axum::{http::header, response::IntoResponse};
+    use maud::{html, Markup};
+
+    #[derive(Default)]
+    pub struct TurboStream(Markup);
+
+    impl TurboStream {
+        pub fn into_string(self) -> String {
+            self.0.into_string()
+        }
+
+        pub fn append(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("append", target, content)
+        }
+
+        pub fn replace(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("replace", target, content)
+        }
+
+        pub fn update_inline(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("update-inline", target, content)
+        }
+
+        fn action(mut self, action: &str, target: impl std::fmt::Display, content: Markup) -> Self {
+            let v = html! {
+                turbo-stream action=(action) target=(target) {
+                    template { (content) };
+                };
+            };
+
+            self.0 .0.push_str(&v.0);
+
+            self
+        }
+    }
+
+    impl IntoResponse for TurboStream {
+        fn into_response(self) -> axum::response::Response {
+            (
+                [(
+                    header::CONTENT_TYPE,
+                    "text/vnd.turbo-stream.html; charset=utf-8",
+                )],
+                self.0.into_string(),
+            )
+                .into_response()
+        }
     }
 }
