@@ -381,10 +381,10 @@ const CHARGE_POINT_GEM_ID: &str = "charge_point_gem";
 const CHARGE_POINT_CHART_ID: &str = "charge_point_chart";
 const CHARGE_POINT_TABLE_ID: &str = "charge_point_table";
 
-pub const PATH: AdminPath = AdminPath;
+const PATH: AdminPath = AdminPath;
 
 #[derive(Copy, Clone)]
-pub struct AdminPath;
+struct AdminPath;
 
 impl fmt::Display for AdminPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -393,21 +393,21 @@ impl fmt::Display for AdminPath {
 }
 
 impl AdminPath {
-    pub fn events(self) -> &'static str {
+    fn events(self) -> &'static str {
         "/admin/events"
     }
 
-    pub fn shutdown(self) -> &'static str {
+    fn shutdown(self) -> &'static str {
         "/admin/shutdown"
     }
 
-    pub fn charge_point(self, name: &str) -> ChargePointPath<'_> {
+    fn charge_point(self, name: &str) -> ChargePointPath<'_> {
         ChargePointPath(name)
     }
 }
 
 #[derive(Copy, Clone)]
-pub struct ChargePointPath<'a>(&'a str);
+struct ChargePointPath<'a>(&'a str);
 
 impl<'a> fmt::Display for ChargePointPath<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -416,43 +416,43 @@ impl<'a> fmt::Display for ChargePointPath<'a> {
 }
 
 impl<'a> ChargePointPath<'a> {
-    pub fn index(self) -> String {
+    fn index(self) -> String {
         self.to_string()
     }
 
-    pub fn events(self) -> String {
+    fn events(self) -> String {
         format!("{self}/events")
     }
 
-    pub fn configuration(self) -> String {
+    fn configuration(self) -> String {
         format!("{self}/configuration")
     }
 
-    pub fn transaction(self) -> String {
+    fn transaction(self) -> String {
         format!("{self}/transaction")
     }
 
-    pub fn trigger(self) -> String {
+    fn trigger(self) -> String {
         format!("{self}/trigger")
     }
 
-    pub fn reset(self) -> String {
+    fn reset(self) -> String {
         format!("{self}/reset")
     }
 
-    pub fn fake_complete(self) -> String {
+    fn fake_complete(self) -> String {
         format!("{self}/fake/complete")
     }
 
-    pub fn fake_start(self) -> String {
+    fn fake_start(self) -> String {
         format!("{self}/fake/start")
     }
 
-    pub fn fake_add_sample(self) -> String {
+    fn fake_add_sample(self) -> String {
         format!("{self}/fake/add_sample")
     }
 
-    pub fn fake_end(self) -> String {
+    fn fake_end(self) -> String {
         format!("{self}/fake/end")
     }
 }
