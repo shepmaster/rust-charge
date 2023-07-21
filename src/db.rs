@@ -692,7 +692,9 @@ fn stop_transaction(
         .optional()
         .context(StopTransactionOldSnafu)?;
 
-    let Some(charge_point_id) = charge_point_id else { return Ok(()) };
+    let Some(charge_point_id) = charge_point_id else {
+        return Ok(());
+    };
 
     add_sample(db, id, meter_stop, timestamp)?;
 
@@ -785,7 +787,9 @@ mod fake {
             .optional()
             .context(FakeAddSampleSnafu)?;
 
-        let Some(transaction_id) = transaction_id else { return Ok(()) };
+        let Some(transaction_id) = transaction_id else {
+            return Ok(());
+        };
 
         add_samples(db, transaction_id, 1)
     }
@@ -848,7 +852,9 @@ mod fake {
             .optional()
             .context(FakeEndTransactionOldSnafu)?;
 
-        let Some(transaction_id) = transaction_id else { return Ok(()) };
+        let Some(transaction_id) = transaction_id else {
+            return Ok(());
+        };
 
         insert_into(complete_transactions::table)
             .values((
@@ -871,7 +877,9 @@ pub struct ChargePointOverview {
 #[instrument(skip_all)]
 fn charge_point_overview(db: &mut PgConnection, name: &str) -> QueryResult<ChargePointOverview> {
     let charge_point_id = charge_point_id_for_name(db, name)?;
-    let Some(charge_point_id) = charge_point_id else { return Ok(Default::default()) };
+    let Some(charge_point_id) = charge_point_id else {
+        return Ok(Default::default());
+    };
 
     let transactions = recent_transactions(db, charge_point_id, 5)?;
     let transaction_ids = transactions

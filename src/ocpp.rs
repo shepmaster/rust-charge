@@ -188,7 +188,11 @@ where
 
         let content = serde_json::to_value(&self.payload).map_err(S::Error::custom)?;
 
-        let Value::Object(o) = content else { return Err(S::Error::custom("Did not serialize payload as an externally tagged enum (not an object)")) };
+        let Value::Object(o) = content else {
+            return Err(S::Error::custom(
+                "Did not serialize payload as an externally tagged enum (not an object)",
+            ));
+        };
         if o.len() != 1 {
             return Err(S::Error::custom(
                 "Did not serialize payload as an externally tagged enum (not exactly 1 key)",
