@@ -19,6 +19,8 @@ services:
 
   database:
     image: "postgres:14-bookworm"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: rust-charge
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
@@ -39,3 +41,6 @@ services:
       retries: 1
     secrets:
       - db_password
+
+volumes:
+  postgres-data:
