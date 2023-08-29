@@ -193,7 +193,7 @@ fn top_nav() -> Markup {
 struct AcceptsTurboStream(bool);
 
 impl AcceptsTurboStream {
-    const MIME_TYPE: &[u8] = b"text/vnd.turbo-stream.html";
+    const MIME_TYPE: &'static [u8] = b"text/vnd.turbo-stream.html";
 }
 
 #[async_trait]
