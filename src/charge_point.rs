@@ -363,7 +363,7 @@ async fn handle_stop_transaction(
             .unwrap();
     }
 
-    db.stop_transaction(transaction_id, meter_stop, timestamp)
+    db.stop_transaction(name, transaction_id, meter_stop, timestamp)
         .await
         .unwrap();
     bus.transaction_sample_added(name);

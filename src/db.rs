@@ -1,8 +1,13 @@
 use chrono::{DateTime, Utc};
 use const_str::squish;
 use diesel::{
-    connection::DefaultLoadingMode, debug_query, delete, deserialize::FromSqlRow, dsl, insert_into,
-    prelude::*, query_builder::DebugQuery, sql_types,
+    connection::DefaultLoadingMode,
+    debug_query, delete,
+    deserialize::FromSqlRow,
+    dsl, insert_into,
+    prelude::*,
+    query_builder::{DebugQuery, QueryId},
+    sql_types,
 };
 use diesel_derive_newtype::DieselNewType;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
@@ -62,6 +67,7 @@ enum DbCommand {
     },
 
     StopTransaction {
+        name: String,
         transaction_id: TransactionId,
         meter_stop: WattHours,
         timestamp: DateTime<Utc>,
@@ -305,11 +311,14 @@ impl Db {
 
     pub(crate) async fn stop_transaction(
         &self,
+        name: impl Into<String>,
         transaction_id: TransactionId,
         meter_stop: WattHours,
         timestamp: DateTime<Utc>,
     ) -> DbResult<()> {
+        let name = name.into();
         self.send(|tx| DbCommand::StopTransaction {
+            name,
             transaction_id,
             meter_stop,
             timestamp,
@@ -555,13 +564,14 @@ impl Task {
                 }
 
                 DbCommand::StopTransaction {
+                    name,
                     transaction_id,
                     meter_stop,
                     timestamp,
                     tx,
                 } => {
                     let r = db.transaction(|db| {
-                        stop_transaction(db, transaction_id, meter_stop, timestamp)
+                        stop_transaction(db, &name, transaction_id, meter_stop, timestamp)
                     });
                     tx.send(r).ok(/* Don't care if receiver is gone */);
                 }
@@ -673,6 +683,79 @@ fn current_transaction(db: &mut PgConnection, name: &str) -> QueryResult<Option<
         .context(CurrentTransactionSnafu)
 }
 
+fn move_current_transaction_to_complete_transaction(
+    db: &mut PgConnection,
+    charge_point_id: ChargePointId,
+) -> Result<(), MoveCurrentToCompleteError> {
+    use schema::current_transactions::columns as curr;
+
+    move_current_transaction_to_complete_transaction_common(db, {
+        curr::charge_point_id.eq(charge_point_id)
+    })
+}
+
+fn move_specific_current_transaction_to_complete_transaction(
+    db: &mut PgConnection,
+    charge_point_id: ChargePointId,
+    transaction_id: TransactionId,
+) -> Result<(), MoveCurrentToCompleteError> {
+    use schema::current_transactions::columns as curr;
+
+    move_current_transaction_to_complete_transaction_common(db, {
+        let cp = curr::charge_point_id.eq(charge_point_id);
+        let tx = curr::transaction_id.eq(transaction_id);
+
+        cp.and(tx)
+    })
+}
+
+fn move_current_transaction_to_complete_transaction_common<Predicate>(
+    db: &mut PgConnection,
+    filter: Predicate,
+) -> Result<(), MoveCurrentToCompleteError>
+where
+    Predicate: BoxableExpression<
+        schema::current_transactions::table,
+        diesel::pg::Pg,
+        SqlType = diesel::sql_types::Bool,
+    >,
+    Predicate: QueryId,
+{
+    use move_current_to_complete_error::*;
+    use schema::complete_transactions::{self, columns as comp};
+    use schema::current_transactions::{self, columns as curr};
+
+    let r: Option<(ChargePointId, TransactionId)> = delete(current_transactions::table)
+        .filter(filter)
+        .returning((curr::charge_point_id, curr::transaction_id))
+        .trace()
+        .get_result(db)
+        .optional()
+        .context(DeleteSnafu)?;
+
+    let Some((charge_point_id, transaction_id)) = r else {
+        return Ok(());
+    };
+
+    insert_into(complete_transactions::table)
+        .values((
+            comp::charge_point_id.eq(charge_point_id),
+            comp::transaction_id.eq(transaction_id),
+        ))
+        .trace()
+        .execute(db)
+        .context(InsertSnafu)
+        .map(drop)
+}
+
+#[derive(Debug, Snafu)]
+#[snafu(module)]
+pub enum MoveCurrentToCompleteError {
+    Delete { source: diesel::result::Error },
+
+    Insert { source: diesel::result::Error },
+}
+
 #[instrument(skip_all)]
 fn start_transaction(
     db: &mut PgConnection,
@@ -685,7 +768,8 @@ fn start_transaction(
 
     let charge_point = ensure_charge_point(db, name)?;
 
-    // todo: close existing open for same chargepoint
+    move_current_transaction_to_complete_transaction(db, charge_point.id)
+        .context(StartTransactionMoveSnafu)?;
 
     let id = insert_into(transactions::table)
         .default_values()
@@ -732,36 +816,17 @@ fn add_sample(
 #[instrument(skip_all)]
 fn stop_transaction(
     db: &mut PgConnection,
-    id: TransactionId,
+    name: &str,
+    transaction_id: TransactionId,
     meter_stop: WattHours,
     timestamp: DateTime<Utc>,
 ) -> QueryResult<()> {
-    use schema::complete_transactions::{self, columns as comp};
-    use schema::current_transactions::{self, columns as curr};
+    let charge_point = ensure_charge_point(db, name)?;
 
-    let charge_point_id: Option<ChargePointId> = delete(current_transactions::table)
-        .filter(curr::transaction_id.eq(id))
-        .returning(curr::charge_point_id)
-        .trace()
-        .get_result(db)
-        .optional()
-        .context(StopTransactionOldSnafu)?;
+    move_specific_current_transaction_to_complete_transaction(db, charge_point.id, transaction_id)
+        .context(StopTransactionMoveSnafu)?;
 
-    let Some(charge_point_id) = charge_point_id else {
-        return Ok(());
-    };
-
-    add_sample(db, id, meter_stop, timestamp)?;
-
-    insert_into(complete_transactions::table)
-        .values((
-            comp::charge_point_id.eq(charge_point_id),
-            comp::transaction_id.eq(id),
-        ))
-        .trace()
-        .execute(db)
-        .context(StopTransactionNewSnafu)
-        .map(drop)
+    add_sample(db, transaction_id, meter_stop, timestamp)
 }
 
 #[cfg(feature = "fake-data")]
@@ -892,34 +957,9 @@ mod fake {
 
     #[instrument(skip_all)]
     pub(crate) fn end_transaction(db: &mut PgConnection, name: &str) -> QueryResult<()> {
-        use schema::complete_transactions::{self, columns as comp};
-        use schema::current_transactions::{self, columns as curr};
-
-        // TODO: Consider merging this with the real function?
-
         let charge_point = ensure_charge_point(db, name)?;
-
-        let transaction_id = delete(current_transactions::table)
-            .filter(curr::charge_point_id.eq(charge_point.id))
-            .returning(curr::transaction_id)
-            .trace()
-            .get_result::<i64>(db)
-            .optional()
-            .context(FakeEndTransactionOldSnafu)?;
-
-        let Some(transaction_id) = transaction_id else {
-            return Ok(());
-        };
-
-        insert_into(complete_transactions::table)
-            .values((
-                comp::transaction_id.eq(transaction_id),
-                comp::charge_point_id.eq(charge_point.id),
-            ))
-            .trace()
-            .execute(db)
-            .context(FakeEndTransactionNewSnafu)
-            .map(drop)
+        move_current_transaction_to_complete_transaction(db, charge_point.id)
+            .context(FakeEndTransactionMoveSnafu)
     }
 }
 
@@ -1374,6 +1414,10 @@ pub(crate) enum QueryError {
         source: diesel::result::Error,
     },
 
+    StartTransactionMove {
+        source: MoveCurrentToCompleteError,
+    },
+
     StartTransactionTransaction {
         source: diesel::result::Error,
     },
@@ -1386,12 +1430,8 @@ pub(crate) enum QueryError {
         source: diesel::result::Error,
     },
 
-    StopTransactionOld {
-        source: diesel::result::Error,
-    },
-
-    StopTransactionNew {
-        source: diesel::result::Error,
+    StopTransactionMove {
+        source: MoveCurrentToCompleteError,
     },
 
     #[cfg(feature = "fake-data")]
@@ -1430,15 +1470,8 @@ pub(crate) enum QueryError {
     },
 
     #[cfg(feature = "fake-data")]
-    #[snafu(display("Could not get the current transaction"))]
-    FakeEndTransactionOld {
-        source: diesel::result::Error,
-    },
-
-    #[cfg(feature = "fake-data")]
-    #[snafu(display("Could not insert the completed transaction"))]
-    FakeEndTransactionNew {
-        source: diesel::result::Error,
+    FakeEndTransactionMove {
+        source: MoveCurrentToCompleteError,
     },
 
     ChargePointIdForName {
