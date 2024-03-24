@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  web:
+    ports:
+      - "8123:80"
+
+secrets:
+  db_password:
+    file: /home/docker/rust-charge/secrets/db_password.txt
+  session_secret:
+    file: /home/docker/rust-charge/secrets/session_secret.txt
