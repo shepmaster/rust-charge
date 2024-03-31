@@ -9,7 +9,7 @@ fake-data = ["dep:rand"]
 [dependencies]
 axum = { version = "0.7.5", default-features = false, features = ["form", "http1", "json", "macros", "query", "ws"] }
 axum-extra = { version = "0.9.3", default-features = false, features = ["cookie", "typed-header"] }
-base64 = { version = "0.21.2", default-features = false, features = ["std"] }
+base64 = { version = "0.22.0", default-features = false, features = ["std"] }
 chrono = { version = "0.4.24", default-features = false, features = ["std"] }
 chrono-tz = { version = "0.8.3", default-features = false, features = ["serde"] }
 const-str = { version = "0.5.5", default-features = false }
