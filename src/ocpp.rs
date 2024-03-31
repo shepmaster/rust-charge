@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 pub use rust_ocpp::v1_6::{
     messages::{
         authorize::*, boot_notification::*, change_configuration::*, get_configuration::*,
-        heart_beat::*, meter_values::*, meter_values::*, remote_start_transaction::*,
-        remote_stop_transaction::*, reset::*, start_transaction::*, status_notification::*,
-        stop_transaction::*, trigger_message::*,
+        heart_beat::*, meter_values::*, remote_start_transaction::*, remote_stop_transaction::*,
+        reset::*, start_transaction::*, status_notification::*, stop_transaction::*,
+        trigger_message::*,
     },
     types::*,
 };
