@@ -3,10 +3,12 @@ use axum::{
     extract::{FromRequestParts, Path, State},
     response::{sse, IntoResponse, Redirect, Sse},
     routing::{delete, get, post},
-    Form, Router, TypedHeader,
+    Form, Router,
 };
-use axum_extra::extract::{cookie::Cookie, CookieJar};
-use axum_sessions::{async_session, extractors::WritableSession, SessionLayer};
+use axum_extra::{
+    extract::{cookie::Cookie, CookieJar},
+    TypedHeader,
+};
 use chrono::{DateTime, Utc};
 use futures::{Future, Stream, StreamExt as _};
 use maud::{html, Markup, PreEscaped};
@@ -22,6 +24,7 @@ use tower_http::{
     trace::{DefaultOnResponse, MakeSpan, TraceLayer},
     ServiceBuilderExt as _,
 };
+use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 use tracing::{info_span, warn};
 
 use self::my_headers::TurboFrame;
@@ -88,9 +91,12 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             .route("/charge_points/:name/fake/end", post(fake_end_transaction));
     }
 
-    let store = async_session::MemoryStore::new();
-    let session_layer =
-        SessionLayer::new(store, &config.session_secret).with_cookie_name(SESSION_ID_COOKIE_NAME);
+    let store = MemoryStore::default();
+    let key = tower_sessions::cookie::Key::from(&config.session_secret);
+    let session_layer = SessionManagerLayer::new(store)
+        .with_secure(false)
+        .with_name(SESSION_ID_COOKIE_NAME)
+        .with_signed(key);
 
     let middleware = ServiceBuilder::new()
         .set_x_request_id(MakeRequestUuid)
@@ -263,7 +269,7 @@ fn flash_string_body(f: &Flash<impl AsRef<str>>) -> Markup {
 
 enum FlashResponder {
     TurboStream,
-    Redirect(WritableSession),
+    Redirect(Session),
 }
 
 #[async_trait]
@@ -271,13 +277,15 @@ impl<S> FromRequestParts<S> for FlashResponder
 where
     S: Send + Sync,
 {
-    type Rejection = Infallible;
+    type Rejection = <Session as FromRequestParts<S>>::Rejection;
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state).await?;
+        let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
+            .await
+            .map_err(|e| match e {})?;
 
         if accepts_turbo_stream.0 {
             Ok(FlashResponder::TurboStream)
@@ -290,7 +298,7 @@ where
 }
 
 impl FlashResponder {
-    fn respond<F, T>(
+    async fn respond<F, T>(
         self,
         flash: F,
         flash_body: impl FnMut(&Flash<T>) -> Markup,
@@ -305,7 +313,7 @@ impl FlashResponder {
                 .into_response(),
 
             FlashResponder::Redirect(session) => {
-                FlashHash(session).set(flash);
+                FlashHash(session).set(flash).await;
 
                 Redirect::to(redirect_uri).into_response()
             }
@@ -372,26 +380,24 @@ fn turbo_delete_button(action: &str, label: &str) -> Markup {
 }
 
 #[derive(Debug)]
-struct FlashHash(WritableSession);
+struct FlashHash(Session);
 
 // Methods take `self` to release the lock as early as possible.
 impl FlashHash {
     const SESSION_KEY: &'static str = "flash";
 
-    fn get<T>(mut self) -> Option<T>
+    async fn get<T>(self) -> Option<T>
     where
         T: DeserializeOwned,
     {
-        let value = self.0.get(Self::SESSION_KEY);
-        self.0.remove(Self::SESSION_KEY);
-        value
+        self.0.remove::<T>(Self::SESSION_KEY).await.unwrap()
     }
 
-    fn set<T>(mut self, value: T)
+    async fn set<T>(self, value: T)
     where
         T: Serialize,
     {
-        self.0.insert(Self::SESSION_KEY, value).unwrap();
+        self.0.insert(Self::SESSION_KEY, value).await.unwrap();
     }
 }
 
@@ -583,11 +589,11 @@ impl AsRef<Flash<String>> for ChargePointFlash {
 
 async fn charge_point(
     Path(name): Path<String>,
-    session: WritableSession,
+    session: Session,
     State(db): State<Db>,
     State(backchannels): State<Backchannels>,
 ) -> Result<Markup> {
-    let flash = FlashHash(session).get::<ChargePointFlash>();
+    let flash = FlashHash(session).get::<ChargePointFlash>().await;
     let flash: &[_] = flash.as_ref().map_or(&[], |f| &f.0);
     let connected = backchannels.has(&name);
     let overview = db
@@ -773,12 +779,14 @@ impl AsRef<Flash<String>> for ChargePointConfigurationFlash {
 
 async fn charge_point_configuration(
     Path(name): Path<String>,
-    session: WritableSession,
+    session: Session,
     State(backchannels): State<Backchannels>,
 ) -> Result<Markup> {
     use Flash::*;
 
-    let flash = FlashHash(session).get::<ChargePointConfigurationFlash>();
+    let flash = FlashHash(session)
+        .get::<ChargePointConfigurationFlash>()
+        .await;
     let mut flash = flash.map_or(Vec::new(), |f| Vec::from_iter(f.0));
 
     let response =
@@ -908,17 +916,19 @@ async fn charge_point_configuration_update(
         Err(_) => Error(format!("Timed out updating key '{key}'")),
     };
 
-    charge_point_configuration_flash(flash_responder, &name, flash)
+    charge_point_configuration_flash(flash_responder, &name, flash).await
 }
 
-fn charge_point_configuration_flash(
+async fn charge_point_configuration_flash(
     flash_responder: FlashResponder,
     name: &str,
     flash: Flash<String>,
 ) -> impl IntoResponse {
     let flash = ChargePointConfigurationFlash([flash]);
     let path = PATH.charge_point(name);
-    flash_responder.respond(flash, flash_string_body, &path.configuration())
+    flash_responder
+        .respond(flash, flash_string_body, &path.configuration())
+        .await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1123,7 +1133,7 @@ async fn charge_point_transaction_create(
         Err(_) => Error("Timed out requesting the transaction start.".into()),
     };
 
-    charge_point_flash(flash_responder, &name, flash)
+    charge_point_flash(flash_responder, &name, flash).await
 }
 
 async fn charge_point_transaction_delete(
@@ -1164,7 +1174,7 @@ async fn charge_point_transaction_delete(
         None => Warning("No current transaction".into()),
     };
 
-    charge_point_flash(flash_responder, &name, flash)
+    charge_point_flash(flash_responder, &name, flash).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -1216,7 +1226,7 @@ async fn charge_point_reset(
         Err(_) => Error("Timed out requesting the reset.".into()),
     };
 
-    charge_point_flash(flash_responder, &name, flash)
+    charge_point_flash(flash_responder, &name, flash).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -1279,7 +1289,7 @@ async fn charge_point_trigger(
         Err(_) => Error("Timed out requesting the message.".into()),
     };
 
-    charge_point_flash(flash_responder, &name, flash)
+    charge_point_flash(flash_responder, &name, flash).await
 }
 
 #[cfg(feature = "fake-data")]
@@ -1298,7 +1308,8 @@ async fn fake_complete_transaction(
         flash_responder,
         &name,
         Flash::Success("Fake data has been created".into()),
-    ))
+    )
+    .await)
 }
 
 #[cfg(feature = "fake-data")]
@@ -1316,7 +1327,8 @@ async fn fake_start_transaction(
         flash_responder,
         &name,
         Flash::Success("Transaction started".into()),
-    ))
+    )
+    .await)
 }
 
 #[cfg(feature = "fake-data")]
@@ -1334,7 +1346,8 @@ async fn fake_add_sample(
         flash_responder,
         &name,
         Flash::Success("Sample added".into()),
-    ))
+    )
+    .await)
 }
 
 #[cfg(feature = "fake-data")]
@@ -1352,17 +1365,20 @@ async fn fake_end_transaction(
         flash_responder,
         &name,
         Flash::Success("Transaction ended".into()),
-    ))
+    )
+    .await)
 }
 
-fn charge_point_flash(
+async fn charge_point_flash(
     flash_responder: FlashResponder,
     name: &str,
     flash: Flash<String>,
 ) -> impl IntoResponse {
     let flash = ChargePointFlash([flash]);
     let path = PATH.charge_point(name);
-    flash_responder.respond(flash, flash_string_body, &path.index())
+    flash_responder
+        .respond(flash, flash_string_body, &path.index())
+        .await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1374,8 +1390,8 @@ impl AsRef<Flash<String>> for ProfileFlash {
     }
 }
 
-async fn profile(cookies: CookieJar, session: WritableSession) -> Markup {
-    let flash = FlashHash(session).get::<ChargePointFlash>();
+async fn profile(cookies: CookieJar, session: Session) -> Markup {
+    let flash = FlashHash(session).get::<ChargePointFlash>().await;
     let flash: &[_] = flash.as_ref().map_or(&[], |f| &f.0);
     let timezone = current_timezone(&cookies);
 
@@ -1425,7 +1441,9 @@ async fn profile_update(
 
     (
         cookies,
-        flash_responder.respond(flash, flash_string_body, PATH.profile()),
+        flash_responder
+            .respond(flash, flash_string_body, PATH.profile())
+            .await,
     )
 }
 
@@ -1541,7 +1559,7 @@ impl IntoResponse for Error {
 }
 
 mod my_headers {
-    use axum::headers::{self, Header, HeaderName, HeaderValue};
+    use axum_extra::headers::{self, Header, HeaderName, HeaderValue};
 
     #[derive(Debug)]
     pub struct TurboFrame(pub String);

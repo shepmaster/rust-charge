@@ -388,8 +388,8 @@ async fn signal_task(token: CancellationToken) -> ! {
     std::process::abort();
 }
 
-async fn webserver(config: Arc<Config>, db: Db, token: CancellationToken) -> hyper::Result<()> {
-    let address = "0.0.0.0:80"
+async fn webserver(config: Arc<Config>, db: Db, token: CancellationToken) -> std::io::Result<()> {
+    let address: std::net::SocketAddr = "0.0.0.0:80"
         .parse()
         .expect("Could not parse the server address");
 
@@ -414,9 +414,11 @@ async fn webserver(config: Arc<Config>, db: Db, token: CancellationToken) -> hyp
         .nest_service("/assets", get_service(assets))
         .with_state(state);
 
-    axum::Server::bind(&address)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(&address)
         .await
+        .expect("Could not bind to address");
+
+    axum::serve(listener, app.into_make_service()).await
 }
 
 trait TimeSource {
