@@ -1475,13 +1475,32 @@ where
 
 #[derive(Debug, Snafu)]
 enum Error {
-    Index { source: DbError },
-    ChargePoint { source: DbError },
+    Index {
+        source: DbError,
+    },
+    ChargePoint {
+        source: DbError,
+    },
 
-    FakeCompleteTransaction { source: DbError },
-    FakeStartTransaction { source: DbError },
-    FakeAddSample { source: DbError },
-    FakeEndTransaction { source: DbError },
+    #[cfg(feature = "fake-data")]
+    FakeCompleteTransaction {
+        source: DbError,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeStartTransaction {
+        source: DbError,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeAddSample {
+        source: DbError,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeEndTransaction {
+        source: DbError,
+    },
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
