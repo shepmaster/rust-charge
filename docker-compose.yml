@@ -16,6 +16,7 @@ services:
     secrets:
       - db_password
       - session_secret
+    restart: unless-stopped
 
   database:
     image: "postgres:14-bookworm"
@@ -41,6 +42,7 @@ services:
       retries: 1
     secrets:
       - db_password
+    restart: unless-stopped
 
 volumes:
   postgres-data:
