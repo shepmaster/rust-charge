@@ -1,3 +1,5 @@
+import { Duration } from 'date-fns';
+
 export function formatWattHours(wattHours: number) {
   const [v, unit] =
     wattHours >= 1000 ? [wattHours / 1000, "kWh"] : [wattHours, "Wh"];

@@ -1,4 +1,4 @@
-import { format, formatISO } from "date-fns";
+import { formatDate, formatISO } from "date-fns";
 import {
   Chart,
   ScaleOptions,
@@ -68,7 +68,7 @@ const formatDate = (rawDateString: string): string => {
 
 const formatDay = (rawDateString: string): string => {
   const date = new Date(rawDateString);
-  return format(date, "dd");
+  return formatDate(date, "dd");
 };
 
 export const relativeTimeScale: ScaleOptions<"linear"> = {
