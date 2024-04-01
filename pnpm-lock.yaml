@@ -21,8 +21,8 @@ dependencies:
     specifier: ^3.6.0
     version: 3.6.0
   stimulus-use:
-    specifier: ^0.52.0
-    version: 0.52.0(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7)
+    specifier: ^0.52.2
+    version: 0.52.2(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7)
   zod:
     specifier: ^3.21.4
     version: 3.22.4
@@ -3158,8 +3158,8 @@ packages:
     deprecated: 'Modern JS already guarantees Array#sort() is a stable sort, so this library is deprecated. See the compatibility table on MDN: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort#browser_compatibility'
     dev: true
 
-  /stimulus-use@0.52.0(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7):
-    resolution: {integrity: sha512-b2Z2krSSIqKvG9ncrjMlxbX3SYg9mgL0g/1Zc25jTZjTr0//wgg7szUi9G67amBs/yLqO12GAEnudybZgYNnjA==}
+  /stimulus-use@0.52.2(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7):
+    resolution: {integrity: sha512-413+tIw9n6Jnb0OFiQE1i3aP01i0hhGgAnPp1P6cNuBbhhqG2IOp8t1O/4s5Tw2lTvSYrFeLNdaY8sYlDaULeg==}
     peerDependencies:
       '@hotwired/stimulus': '>= 3'
       hotkeys-js: '>= 3'
