@@ -128,7 +128,7 @@ pub struct Usage {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, DieselNewType)]
-pub struct TransactionId(pub i64);
+pub struct TransactionId(pub i32);
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RecentTransaction {
@@ -182,7 +182,7 @@ pub struct WattHours(pub f64);
 impl WattHours {
     const ZERO: Self = WattHours(0.0);
 
-    pub fn new_from_i64(value: i64) -> Self {
+    pub fn new_from_i32(value: i32) -> Self {
         WattHours(value as f64)
     }
 }
@@ -1017,7 +1017,7 @@ fn recent_transactions(
         #[diesel(sql_type = sql_types::Bool)]
         pub is_current: bool,
 
-        #[diesel(sql_type = sql_types::BigInt)]
+        #[diesel(sql_type = sql_types::Integer)]
         pub transaction_id: TransactionId,
     }
 
@@ -1152,7 +1152,7 @@ fn transaction_relative_usages(
 ) -> QueryResult<EnergyComparison> {
     #[derive(QueryableByName, FromSqlRow)]
     pub struct RelativeSample {
-        #[diesel(sql_type = sql_types::BigInt)]
+        #[diesel(sql_type = sql_types::Integer)]
         pub transaction_id: TransactionId,
         #[diesel(sql_type = sql_types::Double)]
         pub meter: WattHours,
@@ -1180,7 +1180,7 @@ fn transaction_relative_usages(
              transaction_id,
              sampled_at"#
     ))
-    .bind::<sql_types::Array<sql_types::BigInt>, _>(transaction_ids)
+    .bind::<sql_types::Array<sql_types::Integer>, _>(transaction_ids)
     .trace()
     .get_results::<RelativeSample>(db)
     .context(RelativeUsagesSnafu)?;

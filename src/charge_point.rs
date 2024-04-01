@@ -313,7 +313,7 @@ async fn handle_start_transaction(
         timestamp,
         ..
     } = msg;
-    let meter_start = WattHours::new_from_i64(meter_start);
+    let meter_start = WattHours::new_from_i32(meter_start);
     let TransactionId(transaction_id) = db
         .start_transaction(name, meter_start, timestamp)
         .await
@@ -353,7 +353,7 @@ async fn handle_stop_transaction(
         ..
     } = msg;
     let transaction_id = TransactionId(transaction_id);
-    let meter_stop = WattHours::new_from_i64(meter_stop);
+    let meter_stop = WattHours::new_from_i32(meter_stop);
 
     let meter_values = transaction_data.unwrap_or_default();
     // TODO: batch?

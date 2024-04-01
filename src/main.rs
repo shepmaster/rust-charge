@@ -51,7 +51,7 @@ enum Event {
 
     ChargePointStatus {
         name: Arc<str>,
-        connector_id: u64,
+        connector_id: u32,
         status: ocpp::ChargePointStatus,
     },
 
@@ -89,7 +89,7 @@ impl EventBus {
     fn charge_point_status(
         &self,
         name: impl Into<Arc<str>>,
-        connector_id: u64,
+        connector_id: u32,
         status: ocpp::ChargePointStatus,
     ) {
         let name = name.into();

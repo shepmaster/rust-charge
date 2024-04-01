@@ -14,7 +14,7 @@ diesel::table! {
     complete_transactions (id) {
         id -> Int8,
         charge_point_id -> Int8,
-        transaction_id -> Int8,
+        transaction_id -> Int4,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -24,7 +24,7 @@ diesel::table! {
     current_transactions (id) {
         id -> Int8,
         charge_point_id -> Int8,
-        transaction_id -> Int8,
+        transaction_id -> Int4,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
@@ -33,15 +33,15 @@ diesel::table! {
 diesel::table! {
     samples (id) {
         id -> Int8,
-        transaction_id -> Int8,
-        meter -> Double,
+        transaction_id -> Int4,
+        meter -> Float8,
         sampled_at -> Timestamptz,
     }
 }
 
 diesel::table! {
     transactions (id) {
-        id -> Int8,
+        id -> Int4,
         created_at -> Timestamptz,
         updated_at -> Timestamptz,
     }
