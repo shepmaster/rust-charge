@@ -20,7 +20,7 @@ diesel_migrations = { version = "2.1.0", default-features = false, features = ["
 dotenvy = { version = "0.15.7", default-features = false }
 futures = { version = "0.3.28", default-features = false, features = ["executor"] }
 hyper = { version = "1.2.0", default-features = false }
-itertools = { version = "0.12.0", default-features = false, features = ["use_std"] }
+itertools = { version = "0.13.0", default-features = false, features = ["use_std"] }
 maud = { version = "0.26.0", default-features = false, features = ["axum"] }
 memchr = { version = "2.5.0", default-features = false, features = ["std"] }
 parking_lot = { version = "0.12.1", default-features = false }

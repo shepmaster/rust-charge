@@ -1185,7 +1185,7 @@ fn transaction_relative_usages(
     .get_results::<RelativeSample>(db)
     .context(RelativeUsagesSnafu)?;
 
-    let group = samples.into_iter().group_by(|s| s.transaction_id);
+    let group = samples.into_iter().chunk_by(|s| s.transaction_id);
 
     // Relies on the transaction id ordering matching
     let raw_datasets = group.into_iter().zip(transactions);
