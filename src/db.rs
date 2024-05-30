@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use const_str::squish;
 use diesel::{
     connection::DefaultLoadingMode,
@@ -20,7 +20,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, info_span, instrument, trace, Span};
+use tracing::{info, info_span, instrument, trace, warn, Span};
 
 mod schema;
 
@@ -163,6 +163,8 @@ impl fmt::Display for RecentTransaction {
     derive_more::AddAssign,
     derive_more::Sub,
     derive_more::Sum,
+    PartialOrd,
+    PartialEq,
     DieselNewType,
     Serialize,
 )]
@@ -174,6 +176,18 @@ impl WattHours {
 
     pub fn new_from_i32(value: i32) -> Self {
         WattHours(value as f64)
+    }
+}
+
+impl fmt::Display for WattHours {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (v, unit) = if self.0 >= 1000.0 {
+            (self.0 / 1000.0, "kWh")
+        } else {
+            (self.0, "Wh")
+        };
+
+        write!(f, "{v:.2} {unit}")
     }
 }
 
@@ -791,6 +805,11 @@ fn add_sample(
 ) -> QueryResult<()> {
     use schema::samples::{self, columns as s};
 
+    if let Err(e) = check_sample_consistency(db, id, meter, sampled_at) {
+        warn!("Sample consistency check failed: {e} {e:?}");
+        return Ok(());
+    }
+
     insert_into(samples::table)
         .values((
             s::transaction_id.eq(id),
@@ -801,6 +820,169 @@ fn add_sample(
         .execute(db)
         .context(AddSampleSnafu)
         .map(drop)
+}
+
+// The Kia Niro PHEV battery is 11.1 kWh; 110% (12.2 kWh) gives a
+// little flexibility.
+const BATTERY_LIMIT: WattHours = WattHours(12_200.0);
+
+/// Report if a new sample makes sense to add to the database.
+///
+/// 1. When the power goes out, we start recording samples that claim
+///    to be from time = 0 (1970). Presumably the EVSE clock is reset
+///    and hasn't had a chance to synchronize yet.
+///
+/// 2. We once started a charge when the service had gone down (the
+///    whole server powered off). The service was brought up after
+///    charging was complete. There was a big jump in meter values for
+///    the same transaction:
+///
+///    ```
+///       id   | transaction_id |   meter   |         sampled_at
+///    --------+----------------+-----------+----------------------------
+///     154210 |            270 |         0 | 2024-05-23 15:38:10.001+00
+///     154211 |            270 | 235018.62 | 2024-05-28 11:31:22.001+00
+///     ```
+///
+///    That value exceeds the battery capacity and it's not even possible
+///    to go that fast (we only charge at like 3.6 kWh anyway).
+#[instrument(skip_all)]
+fn check_sample_consistency(
+    db: &mut PgConnection,
+    id: TransactionId,
+    meter: WattHours,
+    sampled_at: DateTime<Utc>,
+) -> Result<(), ConsistencyError> {
+    use consistency_error::*;
+
+    #[derive(QueryableByName)]
+    struct ConsistencyRaw {
+        #[diesel(sql_type = sql_types::Timestamptz)]
+        now: chrono::DateTime<Utc>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Double>)]
+        start_meter: Option<WattHours>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>)]
+        start_sampled_at: Option<DateTime<Utc>>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Double>)]
+        end_meter: Option<WattHours>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>)]
+        end_sampled_at: Option<DateTime<Utc>>,
+    }
+
+    let state = diesel::sql_query(squish!(
+        r#"WITH
+
+           time AS (
+             SELECT CURRENT_TIMESTAMP AS now
+           ),
+
+           range AS (
+             SELECT
+               first_value(meter) OVER w AS start_meter,
+               first_value(sampled_at) OVER w AS start_sampled_at,
+               last_value(meter) OVER w AS end_meter,
+               last_value(sampled_at) OVER w AS end_sampled_at
+             FROM samples
+             WHERE transaction_id = $1
+             WINDOW w AS (
+               PARTITION BY transaction_id
+               ORDER BY
+                 sampled_at ASC,
+                 id ASC
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+             )
+             LIMIT 1
+           )
+
+           SELECT time.*, range.*
+           FROM time
+           FULL JOIN range
+           ON true
+        "#
+    ))
+    .bind::<sql_types::Integer, _>(id)
+    .trace()
+    .get_result::<ConsistencyRaw>(db)
+    .context(QuerySnafu)?;
+
+    let half_width = Duration::minutes(30);
+    let range_start = state.now - half_width;
+    let range_end = state.now + half_width;
+
+    ensure!(
+        (range_start..range_end).contains(&sampled_at),
+        OtherTimeSnafu {
+            sampled_at,
+            range_start,
+            range_end,
+        },
+    );
+
+    let vals = (|| {
+        Some((
+            state.start_meter?,
+            state.start_sampled_at?,
+            state.end_meter?,
+            state.end_sampled_at?,
+        ))
+    })();
+
+    let Some((start_meter, _start_sampled_at, end_meter, end_sampled_at)) = vals else {
+        // This is the first sample
+        return Ok(());
+    };
+
+    ensure!(
+        sampled_at >= end_sampled_at,
+        BackwardsTimeSnafu {
+            sampled_at,
+            end_sampled_at,
+        },
+    );
+
+    ensure!(meter >= end_meter, BackwardsMeterSnafu { meter, end_meter });
+
+    let total = meter - start_meter;
+    ensure!(total <= BATTERY_LIMIT, OverchargeSnafu { total });
+
+    Ok(())
+}
+
+#[derive(Debug, Snafu)]
+#[snafu(module)]
+enum ConsistencyError {
+    #[snafu(display("Could not determine the transaction consistency information"))]
+    Query { source: diesel::result::Error },
+
+    #[snafu(display("New sample occurs at {sampled_at}, which is outside the current time of {range_start} to {range_end}"))]
+    OtherTime {
+        sampled_at: DateTime<Utc>,
+        range_start: DateTime<Utc>,
+        range_end: DateTime<Utc>,
+    },
+
+    #[snafu(display(
+        "New sample occurs at {sampled_at} before previous sample of {end_sampled_at}"
+    ))]
+    BackwardsTime {
+        sampled_at: DateTime<Utc>,
+        end_sampled_at: DateTime<Utc>,
+    },
+
+    #[snafu(display("New sample of {meter} is less than previous sample of {end_meter}"))]
+    BackwardsMeter {
+        meter: WattHours,
+        end_meter: WattHours,
+    },
+
+    #[snafu(display(
+        "New sample would result in a total charge of {total} (max is {BATTERY_LIMIT})"
+    ))]
+    Overcharge { total: WattHours },
 }
 
 #[instrument(skip_all)]
@@ -1602,4 +1784,101 @@ mod test {
     //         Ok::<_, ()>(())
     //     })
     // }
+
+    #[test]
+    fn inconsistent_far_in_the_past() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+            let now = Utc::now();
+
+            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+
+            let far_past = now - Duration::days(1);
+            let e =
+                super::check_sample_consistency(db, t, WattHours(234.567), far_past).unwrap_err();
+            assert!(matches!(e, ConsistencyError::OtherTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_far_in_the_future() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+            let now = Utc::now();
+
+            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+
+            let far_future = now + Duration::days(1);
+            let e =
+                super::check_sample_consistency(db, t, WattHours(234.567), far_future).unwrap_err();
+            assert!(matches!(e, ConsistencyError::OtherTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_time_goes_backwards() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+            let now = Utc::now();
+
+            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+
+            let before = now - Duration::seconds(1);
+            let e = super::check_sample_consistency(db, t, WattHours(234.567), before).unwrap_err();
+            assert!(matches!(e, ConsistencyError::BackwardsTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_meter_goes_backwards() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+            let now = Utc::now();
+
+            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+
+            let less = WattHours(123.000);
+            let e = super::check_sample_consistency(db, t, less, now).unwrap_err();
+            assert!(matches!(e, ConsistencyError::BackwardsMeter { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_overcharged() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+            let now = Utc::now();
+
+            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+
+            let more = WattHours(1_000_000.0);
+            let e = super::check_sample_consistency(db, t, more, now).unwrap_err();
+            assert!(matches!(e, ConsistencyError::Overcharge { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
 }

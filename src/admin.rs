@@ -29,7 +29,7 @@ use tracing::{info_span, warn};
 
 use self::my_headers::TurboFrame;
 use crate::{
-    db::{ChargePoint, ChargePointOverview, Db, DbError, WattHours},
+    db::{ChargePoint, ChargePointOverview, Db, DbError},
     ocpp, Backchannels, Event, EventBus,
 };
 
@@ -130,18 +130,6 @@ impl<B> MakeSpan<B> for MethodUriAndRequest {
         }
 
         span
-    }
-}
-
-impl maud::Render for WattHours {
-    fn render(&self) -> Markup {
-        let (v, unit) = if self.0 >= 1000.0 {
-            (self.0 / 1000.0, "kWh")
-        } else {
-            (self.0, "Wh")
-        };
-
-        html! { (format!("{v:.2} {unit}")) }
     }
 }
 
