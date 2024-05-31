@@ -768,19 +768,13 @@ fn start_transaction(
     timestamp: DateTime<Utc>,
 ) -> QueryResult<TransactionId> {
     use schema::current_transactions::{self, columns as curr};
-    use schema::transactions::{self, columns as t};
 
     let charge_point = ensure_charge_point(db, name)?;
 
     move_current_transaction_to_complete_transaction(db, charge_point.id)
         .context(StartTransactionMoveSnafu)?;
 
-    let id = insert_into(transactions::table)
-        .default_values()
-        .returning(t::id)
-        .trace()
-        .get_result(db)
-        .context(StartTransactionTransactionSnafu)?;
+    let id = start_transaction_raw(db)?;
 
     add_sample(db, id, meter_start, timestamp)?;
 
@@ -796,6 +790,17 @@ fn start_transaction(
     Ok(id)
 }
 
+fn start_transaction_raw(db: &mut PgConnection) -> QueryResult<TransactionId> {
+    use schema::transactions::{self, columns as t};
+
+    insert_into(transactions::table)
+        .default_values()
+        .returning(t::id)
+        .trace()
+        .get_result(db)
+        .context(StartTransactionTransactionSnafu)
+}
+
 #[instrument(skip_all)]
 fn add_sample(
     db: &mut PgConnection,
@@ -803,12 +808,22 @@ fn add_sample(
     meter: WattHours,
     sampled_at: DateTime<Utc>,
 ) -> QueryResult<()> {
-    use schema::samples::{self, columns as s};
-
     if let Err(e) = check_sample_consistency(db, id, meter, sampled_at) {
         warn!("Sample consistency check failed: {e} {e:?}");
         return Ok(());
     }
+
+    add_sample_raw(db, id, meter, sampled_at)
+}
+
+#[instrument(skip_all)]
+fn add_sample_raw(
+    db: &mut PgConnection,
+    id: TransactionId,
+    meter: WattHours,
+    sampled_at: DateTime<Utc>,
+) -> QueryResult<()> {
+    use schema::samples::{self, columns as s};
 
     insert_into(samples::table)
         .values((
@@ -1791,10 +1806,9 @@ mod test {
         let mut db = init_db();
 
         db.test_transaction(|db| {
-            let name = &gen_charge_point_name();
             let now = Utc::now();
 
-            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+            let t = super::start_transaction_raw(db).unwrap();
 
             let far_past = now - Duration::days(1);
             let e =
@@ -1811,10 +1825,9 @@ mod test {
         let mut db = init_db();
 
         db.test_transaction(|db| {
-            let name = &gen_charge_point_name();
             let now = Utc::now();
 
-            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+            let t = super::start_transaction_raw(db).unwrap();
 
             let far_future = now + Duration::days(1);
             let e =
@@ -1831,10 +1844,11 @@ mod test {
         let mut db = init_db();
 
         db.test_transaction(|db| {
-            let name = &gen_charge_point_name();
             let now = Utc::now();
 
-            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(123.456), now).unwrap();
 
             let before = now - Duration::seconds(1);
             let e = super::check_sample_consistency(db, t, WattHours(234.567), before).unwrap_err();
@@ -1850,10 +1864,11 @@ mod test {
         let mut db = init_db();
 
         db.test_transaction(|db| {
-            let name = &gen_charge_point_name();
             let now = Utc::now();
 
-            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(123.456), now).unwrap();
 
             let less = WattHours(123.000);
             let e = super::check_sample_consistency(db, t, less, now).unwrap_err();
@@ -1869,10 +1884,11 @@ mod test {
         let mut db = init_db();
 
         db.test_transaction(|db| {
-            let name = &gen_charge_point_name();
             let now = Utc::now();
 
-            let t = super::start_transaction(db, name, WattHours(123.456), now).unwrap();
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(0.0), now).unwrap();
 
             let more = WattHours(1_000_000.0);
             let e = super::check_sample_consistency(db, t, more, now).unwrap_err();
