@@ -117,16 +117,6 @@ pub struct ChargePoint {
     pub last_seen_at: DateTime<Utc>,
 }
 
-#[derive(Debug, QueryableByName, FromSqlRow, Serialize)]
-pub struct Usage {
-    #[diesel(sql_type = sql_types::BigInt)]
-    pub delta_meter: i64,
-    #[diesel(sql_type = sql_types::Timestamptz)]
-    pub starting_at: DateTime<Utc>,
-    #[diesel(sql_type = sql_types::Timestamptz)]
-    pub ending_at: DateTime<Utc>,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, DieselNewType)]
 pub struct TransactionId(pub i32);
 
