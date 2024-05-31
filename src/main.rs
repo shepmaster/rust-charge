@@ -30,6 +30,7 @@ const LOG_ENV_NAME: &str = "RUST_CHARGE_LOG";
 mod admin;
 mod charge_point;
 mod db;
+mod monitor;
 mod ocpp;
 
 #[derive(Debug, Clone, axum::extract::FromRef)]
@@ -62,6 +63,10 @@ enum Event {
 
     TransactionSampleAdded {
         name: Arc<str>,
+    },
+
+    TransactionSampleInconsistent {
+        error: Arc<db::ConsistencyError>,
     },
 }
 
@@ -110,6 +115,12 @@ impl EventBus {
     fn transaction_sample_added(&self, name: impl Into<Arc<str>>) {
         let name = name.into();
         let evt = Event::TransactionSampleAdded { name };
+        self.0.send(evt).ok(/* Don't care if no listener */);
+    }
+
+    fn transaction_sample_inconsistent(&self, error: db::ConsistencyError) {
+        let error = Arc::new(error);
+        let evt = Event::TransactionSampleInconsistent { error };
         self.0.send(evt).ok(/* Don't care if no listener */);
     }
 }
@@ -266,6 +277,20 @@ fn init_tracing() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
+fn from_env_or_file(name: &str) -> Option<String> {
+    if let Ok(value) = env::var(name) {
+        return Some(value);
+    }
+
+    let name = format!("{name}_FILE");
+    if let Ok(value_path) = env::var(name) {
+        let value = fs::read_to_string(value_path).ok()?;
+        return Some(value.trim().to_string());
+    }
+
+    None
+}
+
 fn database_url_from_env() -> Option<String> {
     if let Ok(url) = env::var("DATABASE_URL") {
         return Some(url);
@@ -274,9 +299,7 @@ fn database_url_from_env() -> Option<String> {
     (|| {
         let host = env::var("DATABASE_HOST").ok()?;
         let user = env::var("DATABASE_USER").ok()?;
-        let password_file = env::var("DATABASE_PASSWORD_FILE").ok()?;
-        let password = fs::read_to_string(password_file).ok()?;
-        let password = password.trim();
+        let password = from_env_or_file("DATABASE_PASSWORD")?;
         let dbname = env::var("DATABASE_DBNAME").ok()?;
 
         let url = format!("host='{host}' user='{user}' password='{password}' dbname='{dbname}'");
@@ -284,24 +307,12 @@ fn database_url_from_env() -> Option<String> {
     })()
 }
 
-fn session_secret_from_env_raw() -> Option<String> {
-    if let Ok(secret) = env::var("RUST_CHARGE_SESSION_SECRET") {
-        return Some(secret);
-    }
-
-    if let Ok(secret_path) = env::var("RUST_CHARGE_SESSION_SECRET_FILE") {
-        return fs::read_to_string(secret_path).ok();
-    }
-
-    None
-}
-
 fn session_secret_from_env() -> Vec<u8> {
-    let session_secret =
-        session_secret_from_env_raw().expect("RUST_CHARGE_SESSION_SECRET must be set");
+    let session_secret = from_env_or_file("RUST_CHARGE_SESSION_SECRET")
+        .expect("RUST_CHARGE_SESSION_SECRET must be set");
 
     let session_secret = BASE64_STANDARD
-        .decode(session_secret.trim())
+        .decode(session_secret)
         .expect("RUST_CHARGE_SESSION_SECRET is not base64");
 
     assert!(session_secret.len() >= 64);
@@ -313,6 +324,8 @@ fn session_secret_from_env() -> Vec<u8> {
 struct Config {
     database_url: String,
     session_secret: Vec<u8>,
+    pushover_api_token: String,
+    pushover_user_key: String,
     log_raw_messages: bool,
 }
 
@@ -320,11 +333,17 @@ impl Config {
     fn from_env() -> Self {
         let database_url = database_url_from_env().expect("DATABASE_URL must be set");
         let session_secret = session_secret_from_env();
+        let pushover_api_token = from_env_or_file("RUST_CHARGE_PUSHOVER_API_TOKEN")
+            .expect("RUST_CHARGE_PUSHOVER_API_TOKEN must be set");
+        let pushover_user_key = from_env_or_file("RUST_CHARGE_PUSHOVER_USER_KEY")
+            .expect("RUST_CHARGE_PUSHOVER_USER_KEY must be set");
         let log_raw_messages = env::var_os("RUST_CHARGE_LOG_RAW_MESSAGES").is_some();
 
         Self {
             database_url,
             session_secret,
+            pushover_api_token,
+            pushover_user_key,
             log_raw_messages,
         }
     }
@@ -340,21 +359,25 @@ async fn main() -> Result<(), Error> {
 
     let config = Arc::new(Config::from_env());
 
+    let event_bus = EventBus::default();
     let token = CancellationToken::new();
 
     let signal_task = tokio::spawn(signal_task(token.clone()));
 
-    let (db, task) =
-        db::Db::new(&config.database_url, token.clone()).context(DatabaseConnectSnafu)?;
+    let (db, task) = db::Db::new(&config.database_url, event_bus.clone(), token.clone())
+        .context(DatabaseConnectSnafu)?;
     let db_task = task::spawn_blocking(|| task.run());
 
-    let server = webserver(config, db, token.clone());
+    let server = webserver(config.clone(), db, event_bus.clone(), token.clone());
+
+    let monitor = tokio::spawn(monitor::task(config, event_bus, token.clone()));
 
     select! {
         () = token.cancelled() => {},
         res = signal_task => panic!("the signal task should not exit {res:?}"),
         res = server => res.expect("could not run the webserver"),
         res = db_task => panic!("the database task should not exit {res:?}"),
+        res = monitor => panic!("the monitor task should not exit {res:?}"),
     }
 
     Ok(())
@@ -388,7 +411,12 @@ async fn signal_task(token: CancellationToken) -> ! {
     std::process::abort();
 }
 
-async fn webserver(config: Arc<Config>, db: Db, token: CancellationToken) -> std::io::Result<()> {
+async fn webserver(
+    config: Arc<Config>,
+    db: Db,
+    event_bus: EventBus,
+    token: CancellationToken,
+) -> std::io::Result<()> {
     let address: std::net::SocketAddr = "0.0.0.0:80"
         .parse()
         .expect("Could not parse the server address");
@@ -401,7 +429,7 @@ async fn webserver(config: Arc<Config>, db: Db, token: CancellationToken) -> std
         token,
         time: SystemTime,
         backchannels: Default::default(),
-        event_bus: Default::default(),
+        event_bus,
     };
 
     let assets = tower_http::services::ServeDir::new("ui/dist/")

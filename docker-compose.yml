@@ -9,6 +9,8 @@ services:
       DATABASE_PASSWORD_FILE: /run/secrets/db_password
       DATABASE_DBNAME: rust-charge
       RUST_CHARGE_SESSION_SECRET_FILE: /run/secrets/session_secret
+      RUST_CHARGE_PUSHOVER_API_TOKEN_FILE: /run/secrets/pushover_api_token
+      RUST_CHARGE_PUSHOVER_USER_KEY_FILE: /run/secrets/pushover_user_key
       RUST_CHARGE_LOG: rust_charge=info
     depends_on:
       database:
@@ -16,6 +18,8 @@ services:
     secrets:
       - db_password
       - session_secret
+      - pushover_api_token
+      - pushover_user_key
     restart: unless-stopped
 
   database:

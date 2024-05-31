@@ -10,3 +10,7 @@ secrets:
     file: /home/docker/rust-charge/secrets/db_password.txt
   session_secret:
     file: /home/docker/rust-charge/secrets/session_secret.txt
+  pushover_api_token:
+    file: /home/docker/rust-charge/secrets/pushover_api_token.txt
+  pushover_user_key:
+    file: /home/docker/rust-charge/secrets/pushover_user_key.txt

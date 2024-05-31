@@ -22,6 +22,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span, instrument, trace, warn, Span};
 
+use crate::EventBus;
+
 mod schema;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
@@ -228,13 +230,22 @@ type ChannelData = (Span, DbCommand);
 pub struct Db(mpsc::Sender<ChannelData>);
 
 impl Db {
-    pub(crate) fn new(database_url: &str, token: CancellationToken) -> DbResult<(Self, Task)> {
+    pub(crate) fn new(
+        database_url: &str,
+        event_bus: EventBus,
+        token: CancellationToken,
+    ) -> DbResult<(Self, Task)> {
         let db = init(database_url)?;
 
         let (tx, rx) = mpsc::channel(4);
 
         let this = Self(tx);
-        let task = Task { rx, db, token };
+        let task = Task {
+            rx,
+            db,
+            event_bus,
+            token,
+        };
 
         Ok((this, task))
     }
@@ -495,13 +506,19 @@ pub(crate) type DbResult<T, E = DbError> = std::result::Result<T, E>;
 pub struct Task {
     rx: mpsc::Receiver<ChannelData>,
     db: PgConnection,
+    event_bus: EventBus,
     token: CancellationToken,
 }
 
 impl Task {
     #[instrument(skip_all)]
     pub fn run(mut self) {
-        let Self { rx, db, token } = &mut self;
+        let Self {
+            rx,
+            db,
+            event_bus,
+            token,
+        } = &mut self;
 
         info!("starting task");
 
@@ -562,8 +579,9 @@ impl Task {
                     timestamp,
                     tx,
                 } => {
-                    let transaction_id =
-                        db.transaction(|db| start_transaction(db, &name, meter_start, timestamp));
+                    let transaction_id = db.transaction(|db| {
+                        start_transaction(db, event_bus, &name, meter_start, timestamp)
+                    });
                     tx.send(transaction_id).ok(/* Don't care if receiver is gone */);
                 }
 
@@ -575,7 +593,14 @@ impl Task {
                     tx,
                 } => {
                     let r = db.transaction(|db| {
-                        stop_transaction(db, &name, transaction_id, meter_stop, timestamp)
+                        stop_transaction(
+                            db,
+                            event_bus,
+                            &name,
+                            transaction_id,
+                            meter_stop,
+                            timestamp,
+                        )
                     });
                     tx.send(r).ok(/* Don't care if receiver is gone */);
                 }
@@ -586,7 +611,9 @@ impl Task {
                     timestamp,
                     tx,
                 } => {
-                    let r = db.transaction(|db| add_sample(db, transaction_id, meter, timestamp));
+                    let r = db.transaction(|db| {
+                        add_sample(db, event_bus, transaction_id, meter, timestamp)
+                    });
                     tx.send(r).ok(/* Don't care if receiver is gone */);
                 }
 
@@ -763,6 +790,7 @@ pub enum MoveCurrentToCompleteError {
 #[instrument(skip_all)]
 fn start_transaction(
     db: &mut PgConnection,
+    event_bus: &mut EventBus,
     name: &str,
     meter_start: WattHours,
     timestamp: DateTime<Utc>,
@@ -776,7 +804,7 @@ fn start_transaction(
 
     let id = start_transaction_raw(db)?;
 
-    add_sample(db, id, meter_start, timestamp)?;
+    add_sample(db, event_bus, id, meter_start, timestamp)?;
 
     insert_into(current_transactions::table)
         .values((
@@ -804,12 +832,14 @@ fn start_transaction_raw(db: &mut PgConnection) -> QueryResult<TransactionId> {
 #[instrument(skip_all)]
 fn add_sample(
     db: &mut PgConnection,
+    event_bus: &mut EventBus,
     id: TransactionId,
     meter: WattHours,
     sampled_at: DateTime<Utc>,
 ) -> QueryResult<()> {
     if let Err(e) = check_sample_consistency(db, id, meter, sampled_at) {
         warn!("Sample consistency check failed: {e} {e:?}");
+        event_bus.transaction_sample_inconsistent(e);
         return Ok(());
     }
 
@@ -969,7 +999,7 @@ fn check_sample_consistency(
 
 #[derive(Debug, Snafu)]
 #[snafu(module)]
-enum ConsistencyError {
+pub enum ConsistencyError {
     #[snafu(display("Could not determine the transaction consistency information"))]
     Query { source: diesel::result::Error },
 
@@ -1003,6 +1033,7 @@ enum ConsistencyError {
 #[instrument(skip_all)]
 fn stop_transaction(
     db: &mut PgConnection,
+    event_bus: &mut EventBus,
     name: &str,
     transaction_id: TransactionId,
     meter_stop: WattHours,
@@ -1013,7 +1044,7 @@ fn stop_transaction(
     move_specific_current_transaction_to_complete_transaction(db, charge_point.id, transaction_id)
         .context(StopTransactionMoveSnafu)?;
 
-    add_sample(db, transaction_id, meter_stop, timestamp)
+    add_sample(db, event_bus, transaction_id, meter_stop, timestamp)
 }
 
 #[cfg(feature = "fake-data")]
