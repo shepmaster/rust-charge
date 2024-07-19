@@ -1441,7 +1441,7 @@ impl DailyUsageForMonth {
     }
 }
 
-sql_function! {
+define_sql_function! {
     fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
 }
 
