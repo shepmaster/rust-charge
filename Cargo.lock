@@ -1484,9 +1484,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ocpp"
-version = "0.4.4"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c31ace991e7572f61de55ad0c9287487ea31205becc7059123f6205af2c995c"
+checksum = "e1965a7854aa648fc21638e3e9a4b173b666d20503d7151263fec3a69fa9dba5"
 dependencies = [
  "chrono",
  "regex",
