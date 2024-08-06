@@ -17,6 +17,7 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "^9.8.0",
     "@parcel/compressor-brotli": "^2.9.3",
     "@parcel/compressor-gzip": "^2.9.3",
     "@parcel/config-default": "^2.9.3",
@@ -24,15 +25,15 @@
     "@parcel/optimizer-data-url": "^2.9.3",
     "@parcel/optimizer-terser": "^2.9.3",
     "@parcel/transformer-inline-string": "^2.9.3",
-    "@typescript-eslint/eslint-plugin": "^7.4.0",
-    "@typescript-eslint/parser": "^7.4.0",
-    "eslint": "^8.45.0",
+    "@types/eslint__js": "^8.42.3",
+    "eslint": "^9.8.0",
     "eslint-config-prettier": "^9.1.0",
     "parcel": "^2.9.3",
     "postcss": "^8.4.27",
     "prettier": "^3.0.0",
     "tailwindcss": "^3.3.3",
-    "typescript": "^5.1.6"
+    "typescript": "^5.1.6",
+    "typescript-eslint": "^8.0.1"
   },
   "dependencies": {
     "@hotwired/stimulus": "^3.2.1",

@@ -19,7 +19,7 @@ declare global {
   }
 
   // https://github.com/hotwired/turbo/pull/800
-  // eslint-disable-next-line @typescript-eslint/no-empty-interface
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ElementEventMap extends TurboEventMap {}
 }
 
