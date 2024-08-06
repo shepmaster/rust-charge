@@ -1,4 +1,4 @@
-import { Duration } from 'date-fns';
+import { Duration } from "date-fns";
 
 export function formatWattHours(wattHours: number) {
   const [v, unit] =
