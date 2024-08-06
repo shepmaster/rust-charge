@@ -23,7 +23,6 @@
     "@parcel/config-default": "^2.9.3",
     "@parcel/core": "^2.9.3",
     "@parcel/optimizer-data-url": "^2.9.3",
-    "@parcel/optimizer-terser": "^2.9.3",
     "@parcel/transformer-inline-string": "^2.9.3",
     "@types/eslint__js": "^8.42.3",
     "eslint": "^9.8.0",
