@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.5
-FROM rust:1.81-bookworm as toolchain
+FROM rust:1.82-bookworm as toolchain
 
 WORKDIR /rust-charge
 
