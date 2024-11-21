@@ -35,8 +35,8 @@ snafu = { version = "0.8.2", default-features = false, features = ["rust_1_65", 
 tokio = { version = "1.28.2", default-features = false, features = ["macros", "rt-multi-thread", "signal"] }
 tokio-stream = { version = "0.1.14", default-features = false, features = ["sync", "time"] }
 tokio-util = { version = "0.7.8", default-features = false }
-tower = { version = "0.4.13", default-features = false }
-tower-http = { version = "0.5.2", default-features = false, features = ["fs", "request-id", "trace", "util"] }
-tower-sessions = { version = "0.12.0", default-features = false, features = ["axum-core", "memory-store", "signed"] }
+tower = { version = "0.5.1", default-features = false }
+tower-http = { version = "0.6.2", default-features = false, features = ["fs", "request-id", "trace", "util"] }
+tower-sessions = { version = "0.13.0", default-features = false, features = ["axum-core", "memory-store", "signed"] }
 tracing = { version = "0.1.37", default-features = false, features = ["attributes", "std"] }
 tracing-subscriber = { version = "0.3.17", default-features = false, features = ["ansi", "env-filter", "std"] }
