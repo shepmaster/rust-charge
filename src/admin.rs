@@ -1,5 +1,4 @@
 use axum::{
-    async_trait,
     extract::{FromRequestParts, Path, State},
     response::{sse, IntoResponse, Redirect, Sse},
     routing::{delete, get, post},
@@ -44,31 +43,31 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
     let mut router = Router::new()
         .route("/", get(index))
         .route("/events", get(index_events))
-        .route("/charge_points/:name", get(charge_point))
-        .route("/charge_points/:name/events", get(charge_point_events))
+        .route("/charge_points/{name}", get(charge_point))
+        .route("/charge_points/{name}/events", get(charge_point_events))
         .route(
-            "/charge_points/:name/configuration",
+            "/charge_points/{name}/configuration",
             get(charge_point_configuration),
         )
         .route(
-            "/charge_points/:name/configuration",
+            "/charge_points/{name}/configuration",
             post(charge_point_configuration_update),
         )
-        .route("/charge_points/:name/usage", get(charge_point_usage))
+        .route("/charge_points/{name}/usage", get(charge_point_usage))
         .route(
-            "/charge_points/:name/usage/events",
+            "/charge_points/{name}/usage/events",
             get(charge_point_usage_events),
         )
         .route(
-            "/charge_points/:name/transaction",
+            "/charge_points/{name}/transaction",
             post(charge_point_transaction_create),
         )
         .route(
-            "/charge_points/:name/transaction",
+            "/charge_points/{name}/transaction",
             delete(charge_point_transaction_delete),
         )
-        .route("/charge_points/:name/trigger", post(charge_point_trigger))
-        .route("/charge_points/:name/reset", post(charge_point_reset))
+        .route("/charge_points/{name}/trigger", post(charge_point_trigger))
+        .route("/charge_points/{name}/reset", post(charge_point_reset))
         .route("/profile", get(profile))
         .route("/profile", post(profile_update))
         .route("/shutdown", post(shutdown));
@@ -77,18 +76,18 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
     {
         router = router
             .route(
-                "/charge_points/:name/fake/complete",
+                "/charge_points/{name}/fake/complete",
                 post(fake_complete_transaction),
             )
             .route(
-                "/charge_points/:name/fake/start",
+                "/charge_points/{name}/fake/start",
                 post(fake_start_transaction),
             )
             .route(
-                "/charge_points/:name/fake/add_sample",
+                "/charge_points/{name}/fake/add_sample",
                 post(fake_add_sample),
             )
-            .route("/charge_points/:name/fake/end", post(fake_end_transaction));
+            .route("/charge_points/{name}/fake/end", post(fake_end_transaction));
     }
 
     let store = MemoryStore::default();
@@ -190,20 +189,21 @@ impl AcceptsTurboStream {
     const MIME_TYPE: &'static [u8] = b"text/vnd.turbo-stream.html";
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AcceptsTurboStream {
     type Rejection = Infallible;
 
-    async fn from_request_parts(
+    fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let found = parts
-            .headers
-            .get_all("accept")
-            .iter()
-            .any(|v| memchr::memmem::find(v.as_bytes(), Self::MIME_TYPE).is_some());
-        Ok(Self(found))
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        async move {
+            let found = parts
+                .headers
+                .get_all("accept")
+                .iter()
+                .any(|v| memchr::memmem::find(v.as_bytes(), Self::MIME_TYPE).is_some());
+            Ok(Self(found))
+        }
     }
 }
 
@@ -260,27 +260,28 @@ enum FlashResponder {
     Redirect(Session),
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for FlashResponder
 where
     S: Send + Sync,
 {
     type Rejection = <Session as FromRequestParts<S>>::Rejection;
 
-    async fn from_request_parts(
+    fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
-            .await
-            .map_err(|e| match e {})?;
-
-        if accepts_turbo_stream.0 {
-            Ok(FlashResponder::TurboStream)
-        } else {
-            FromRequestParts::from_request_parts(parts, state)
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        async move {
+            let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
                 .await
-                .map(FlashResponder::Redirect)
+                .map_err(|e| match e {})?;
+
+            if accepts_turbo_stream.0 {
+                Ok(FlashResponder::TurboStream)
+            } else {
+                Session::from_request_parts(parts, state)
+                    .await
+                    .map(FlashResponder::Redirect)
+            }
         }
     }
 }

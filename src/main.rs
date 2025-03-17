@@ -438,7 +438,7 @@ async fn webserver(
 
     let app = Router::new()
         .nest("/admin", admin::router(&config))
-        .route("/charge_points/:name", get(charge_point::connection))
+        .route("/charge_points/{name}", get(charge_point::connection))
         .nest_service("/assets", get_service(assets))
         .with_state(state);
 

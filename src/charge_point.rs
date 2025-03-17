@@ -511,7 +511,7 @@ where
 
     let resp = serde_json::to_string(&resp).expect("Could not serialize JSON");
     socket
-        .send(Message::Text(resp))
+        .send(Message::Text(resp.into()))
         .await
         .expect("Could not reply to charge point");
 }
@@ -604,7 +604,7 @@ impl BackchannelProcessor {
             payload,
         };
         let c = serde_json::to_string(&c).unwrap();
-        socket.send(Message::Text(c)).await.unwrap();
+        socket.send(Message::Text(c.into())).await.unwrap();
 
         self.waiting_for_responses.insert(
             unique_id,
