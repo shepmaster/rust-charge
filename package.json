@@ -25,7 +25,6 @@
     "@parcel/optimizer-data-url": "^2.9.3",
     "@parcel/transformer-inline-string": "^2.9.3",
     "@tailwindcss/postcss": "^4.1.18",
-    "@types/eslint__js": "^8.42.3",
     "eslint": "^9.8.0",
     "eslint-config-prettier": "^9.1.0",
     "parcel": "^2.9.3",
