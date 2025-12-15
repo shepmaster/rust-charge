@@ -348,9 +348,9 @@ fn connected_gem<'a>(id: impl Into<Option<&'a str>>, connected: bool) -> Markup 
     }
 }
 
-const BUTTON_CLASS: &str = "bg-sky-700 hover:bg-sky-600 text-slate-100 p-1 rounded-sm";
+const BUTTON_CLASS: &str = "bg-sky-700 hover:bg-sky-600 text-slate-100 p-1 rounded-xs";
 const SMALL_BUTTON_CLASS: &str =
-    "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-sm text-xs";
+    "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-xs text-xs";
 
 fn turbo_button(action: &str, label: &str) -> Markup {
     html! {
