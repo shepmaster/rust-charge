@@ -7,7 +7,7 @@ import {
   ChartDataset,
   ChartType,
 } from "chart.js";
-import { z } from "zod";
+import * as z from "zod";
 import "chartjs-adapter-date-fns";
 
 import { UpdateInlineEvent } from "./event";
@@ -117,13 +117,13 @@ export const wattHoursScale: ScaleOptions<"linear"> = {
 type OurTooltipItem = TooltipItem<"line"> | TooltipItem<"bar">;
 
 export const relativeTimeTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
-  ctx.map((c) => formatDuration(c.parsed.x));
+  ctx.map((c) => formatDuration(c.parsed.x ?? 0));
 
 export const dateOnlyCategoryTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
   ctx.map((c) => formatDate(c.label));
 
 export const wattHourTooltip = <C extends OurTooltipItem>(ctx: C) =>
-  formatWattHours(ctx.parsed.y);
+  formatWattHours(ctx.parsed.y ?? 0);
 
 interface MakeLoaderProps<S> {
   schema: S;

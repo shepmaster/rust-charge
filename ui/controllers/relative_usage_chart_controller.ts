@@ -9,7 +9,7 @@ import {
   TimeScale,
   Tooltip,
 } from "chart.js";
-import { z } from "zod";
+import * as z from "zod";
 import "chartjs-adapter-date-fns";
 
 import {
