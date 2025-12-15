@@ -19,10 +19,10 @@ importers:
         version: 4.5.1
       chartjs-adapter-date-fns:
         specifier: ^3.0.0
-        version: 3.0.0(chart.js@4.5.1)(date-fns@3.6.0)
+        version: 3.0.0(chart.js@4.5.1)(date-fns@4.1.0)
       date-fns:
-        specifier: ^3.6.0
-        version: 3.6.0
+        specifier: ^4.1.0
+        version: 4.1.0
       stimulus-use:
         specifier: ^0.52.2
         version: 0.52.3(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7)
@@ -904,8 +904,8 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
 
-  date-fns@3.6.0:
-    resolution: {integrity: sha512-fRHTG8g/Gif+kSh50gaGEdToemgfj74aRX3swtiouboip5JDLAyDE9F11nHMIcvOaXeOC6D7SpNhi7uFyB7Uww==}
+  date-fns@4.1.0:
+    resolution: {integrity: sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2658,10 +2658,10 @@ snapshots:
     dependencies:
       '@kurkle/color': 0.3.4
 
-  chartjs-adapter-date-fns@3.0.0(chart.js@4.5.1)(date-fns@3.6.0):
+  chartjs-adapter-date-fns@3.0.0(chart.js@4.5.1)(date-fns@4.1.0):
     dependencies:
       chart.js: 4.5.1
-      date-fns: 3.6.0
+      date-fns: 4.1.0
 
   chokidar@3.6.0:
     dependencies:
@@ -2699,7 +2699,7 @@ snapshots:
 
   cssesc@3.0.0: {}
 
-  date-fns@3.6.0: {}
+  date-fns@4.1.0: {}
 
   debug@4.4.3:
     dependencies:
