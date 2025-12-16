@@ -189,21 +189,22 @@ impl AcceptsTurboStream {
     const MIME_TYPE: &'static [u8] = b"text/vnd.turbo-stream.html";
 }
 
-impl<S> FromRequestParts<S> for AcceptsTurboStream {
+impl<S> FromRequestParts<S> for AcceptsTurboStream
+where
+    S: Send + Sync,
+{
     type Rejection = Infallible;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &S,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move {
-            let found = parts
-                .headers
-                .get_all("accept")
-                .iter()
-                .any(|v| memchr::memmem::find(v.as_bytes(), Self::MIME_TYPE).is_some());
-            Ok(Self(found))
-        }
+    ) -> Result<Self, Self::Rejection> {
+        let found = parts
+            .headers
+            .get_all("accept")
+            .iter()
+            .any(|v| memchr::memmem::find(v.as_bytes(), Self::MIME_TYPE).is_some());
+        Ok(Self(found))
     }
 }
 
@@ -266,22 +267,20 @@ where
 {
     type Rejection = <Session as FromRequestParts<S>>::Rejection;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         state: &S,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move {
-            let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
-                .await
-                .map_err(|e| match e {})?;
+    ) -> Result<Self, Self::Rejection> {
+        let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
+            .await
+            .map_err(|e| match e {})?;
 
-            if accepts_turbo_stream.0 {
-                Ok(FlashResponder::TurboStream)
-            } else {
-                Session::from_request_parts(parts, state)
-                    .await
-                    .map(FlashResponder::Redirect)
-            }
+        if accepts_turbo_stream.0 {
+            Ok(FlashResponder::TurboStream)
+        } else {
+            Session::from_request_parts(parts, state)
+                .await
+                .map(FlashResponder::Redirect)
         }
     }
 }

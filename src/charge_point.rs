@@ -193,7 +193,7 @@ async fn handle_charge_point(
 
                 if let Ok(msg) = serde_json::from_str(&msg) {
                     handle_charge_point_msg(&mut socket, &name, &db, &bus, &time, msg).await;
-                } else if let Ok(_) = backchannel_processor.resolve_pending(&msg).await {
+                } else if let Ok(()) = backchannel_processor.resolve_pending(&msg).await {
                     // Nothing to do; handled
                 } else if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&msg) {
                     warn!("Other JSON request: {msg:?}")
