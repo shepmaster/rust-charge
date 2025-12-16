@@ -18,7 +18,7 @@ mod queries;
 mod schema;
 
 pub(crate) use queries::{ChargePointOverview, ConsistencyError};
-use queries::{DailyUsageForMonth, QueryError, QueryResult};
+use queries::{DivisionUsageForPeriod, QueryError, QueryResult};
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
@@ -47,7 +47,7 @@ enum DbCommand {
         name: String,
         instant: DateTime<Utc>,
         timezone: chrono_tz::Tz,
-        tx: oneshot::Sender<QueryResult<DailyUsageForMonth>>,
+        tx: oneshot::Sender<QueryResult<DivisionUsageForPeriod>>,
     },
 
     CurrentTransaction {
@@ -279,7 +279,7 @@ impl Db {
         name: impl Into<String>,
         instant: DateTime<Utc>,
         timezone: chrono_tz::Tz,
-    ) -> DbResult<DailyUsageForMonth> {
+    ) -> DbResult<DivisionUsageForPeriod> {
         let name = name.into();
         self.send(|tx| DbCommand::DailyUsageForMonth {
             name,

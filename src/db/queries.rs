@@ -810,11 +810,11 @@ fn transaction_relative_usages(
 }
 
 #[derive(Debug, Default, Serialize)]
-pub struct DailyUsageForMonth {
+pub struct DivisionUsageForPeriod {
     datasets: Option<[DataSet<DateTime<Utc>, WattHours>; 1]>,
 }
 
-impl DailyUsageForMonth {
+impl DivisionUsageForPeriod {
     pub fn total(&self) -> WattHours {
         match &self.datasets {
             Some(v) => v[0].data.iter().map(|d| d.y).sum(),
@@ -823,24 +823,40 @@ impl DailyUsageForMonth {
     }
 }
 
-define_sql_function! {
-    fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
-}
-
 #[instrument(skip_all)]
 pub fn daily_usage_for_month(
     db: &mut PgConnection,
     name: &str,
     instant: DateTime<Utc>,
     timezone: chrono_tz::Tz,
-) -> QueryResult<DailyUsageForMonth> {
+) -> QueryResult<DivisionUsageForPeriod> {
+    division_usage_for_period(db, name, instant, timezone, "day", "month", "Daily usage")
+}
+
+define_sql_function! {
+    fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
+}
+
+#[instrument(skip_all)]
+fn division_usage_for_period(
+    db: &mut PgConnection,
+    name: &str,
+    instant: DateTime<Utc>,
+    timezone: chrono_tz::Tz,
+    division: &str,
+    period: &str,
+    label: impl Into<String>,
+) -> QueryResult<DivisionUsageForPeriod> {
     #[derive(QueryableByName, FromSqlRow)]
-    struct DailyUsage {
+    struct DivisionUsage {
         #[diesel(sql_type = sql_types::Timestamptz)]
-        pub day: DateTime<Utc>,
+        pub division: DateTime<Utc>,
         #[diesel(sql_type = sql_types::Double)]
         pub usage: WattHours,
     }
+
+    let one_division = format!("1 {division}");
+    let one_period = format!("1 {period}");
 
     let charge_point_id = charge_point_id_for_name(db, name)?;
     let Some(charge_point_id) = charge_point_id else {
@@ -849,15 +865,20 @@ pub fn daily_usage_for_month(
 
     let samples = db.transaction(|db| {
         let timezone = timezone.to_string();
-        diesel::select(set_config("timezone", timezone, true)).trace().execute(db).context(DailyUsageForMonthTimezoneSnafu)?;
+        diesel::select(set_config("timezone", timezone, true)).trace().execute(db).context(DivisionUsageForPeriodTimezoneSnafu)?;
 
-        // This takes all the samples, splitting them when they cross the
-        // boundary between days, then sums up the usage by day in a
-        // calendar month.
+        // This takes all the samples, splitting them when they cross
+        // the boundary between divisions, then sums up the usage by
+        // division in a period.
+        //
+        // | division | period |
+        // |----------|--------|
+        // | day      | month  |
+        // | month    | year   |
         //
         // Could maybe add some pre-filtering of sample data by a
-        // loose date range. It needs to be a little beyond the month
-        // ranges in order to capture any transactions cross the
+        // loose date range. It needs to be a little beyond the period
+        // ranges in order to capture any transactions which cross the
         // boundary.
         diesel::sql_query(squish!(
             r#"
@@ -909,7 +930,7 @@ pub fn daily_usage_for_month(
               AND sampled_at <> prev_sampled_at
             ),
 
-            sample_deltas_split_on_day_crossing AS (
+            sample_deltas_split_on_division_crossing AS (
               SELECT *
               FROM sample_deltas
 
@@ -917,16 +938,16 @@ pub fn daily_usage_for_month(
                 SELECT
                   meter_delta / extract(epoch FROM (sampled_at - prev_sampled_at)) AS rate,
                   generate_series(
-                    date_trunc('day', sample_deltas.prev_sampled_at),
-                    date_trunc('day', sample_deltas.sampled_at),
-                    '1 day'::interval
-                  ) AS day_start
+                    date_trunc($4, sample_deltas.prev_sampled_at),
+                    date_trunc($4, sample_deltas.sampled_at),
+                    $3::interval
+                  ) AS division_start
               ) l1 ON true
 
               JOIN LATERAL (
                 SELECT
-                  greatest(sample_deltas.prev_sampled_at, day_start) AS effective_prev_sampled_at,
-                  least(sample_deltas.sampled_at, day_start + '1 day'::interval) AS effective_sampled_at
+                  greatest(sample_deltas.prev_sampled_at, division_start) AS effective_prev_sampled_at,
+                  least(sample_deltas.sampled_at, division_start + $3::interval) AS effective_sampled_at
               ) l2 ON true
 
               JOIN LATERAL (
@@ -935,54 +956,58 @@ pub fn daily_usage_for_month(
               ) l3 ON true
             ),
 
-            usage_by_day AS (
+            usage_by_division AS (
               SELECT
-                day_start,
+                division_start,
                 sum(effective_meter_delta) AS usage
-              FROM sample_deltas_split_on_day_crossing
-              GROUP BY day_start
+              FROM sample_deltas_split_on_division_crossing
+              GROUP BY division_start
             ),
 
-            this_month AS (
+            this_period AS (
               SELECT
                 generate_series(
-                  date_trunc('month', $2),
-                  date_trunc('month', $2) + '1 month'::interval - '1 day'::interval,
-                  '1 day'::interval
-                ) AS day
+                  date_trunc($6, $2),
+                  date_trunc($6, $2) + $5::interval - $3::interval,
+                  $3::interval
+                ) AS division
             ),
 
-            usage_this_month AS (
+            usage_this_period AS (
               SELECT
-                this_month.day,
-                coalesce(usage_by_day.usage, 0) AS usage
-              FROM this_month
-              LEFT JOIN usage_by_day ON usage_by_day.day_start = this_month.day
-              ORDER BY day
+                this_period.division,
+                coalesce(usage_by_division.usage, 0) AS usage
+              FROM this_period
+              LEFT JOIN usage_by_division ON usage_by_division.division_start = this_period.division
+              ORDER BY division
             )
 
-            SELECT * FROM usage_this_month
+            SELECT * FROM usage_this_period;
             "#
         ))
             .bind::<sql_types::BigInt, _>(charge_point_id)
             .bind::<sql_types::Timestamptz, _>(instant)
+            .bind::<sql_types::Text, _>(one_division)
+            .bind::<sql_types::Text, _>(division)
+            .bind::<sql_types::Text, _>(one_period)
+            .bind::<sql_types::Text, _>(period)
             .trace()
-            .get_results::<DailyUsage>(db)
-            .context(DailyUsageForMonthSnafu)
+            .get_results::<DivisionUsage>(db)
+            .context(DivisionUsageForPeriodSnafu)
     })?;
 
     let datasets = Some([DataSet {
-        label: "Daily usage".into(),
+        label: label.into(),
         data: samples
             .into_iter()
             .map(|s| DataPoint {
-                x: s.day,
+                x: s.division,
                 y: s.usage,
             })
             .collect(),
     }]);
 
-    Ok(DailyUsageForMonth { datasets })
+    Ok(DivisionUsageForPeriod { datasets })
 }
 
 #[derive(Debug, Snafu)]
@@ -1094,11 +1119,11 @@ pub enum QueryError {
         source: diesel::result::Error,
     },
 
-    DailyUsageForMonthTimezone {
+    DivisionUsageForPeriodTimezone {
         source: diesel::result::Error,
     },
 
-    DailyUsageForMonth {
+    DivisionUsageForPeriod {
         source: diesel::result::Error,
     },
 }
