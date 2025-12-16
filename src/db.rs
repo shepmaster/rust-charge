@@ -51,7 +51,7 @@ enum DbCommand {
 
     DailyUsageForMonth {
         name: String,
-        day: DateTime<Utc>,
+        instant: DateTime<Utc>,
         timezone: chrono_tz::Tz,
         tx: oneshot::Sender<QueryResult<DailyUsageForMonth>>,
     },
@@ -283,13 +283,13 @@ impl Db {
     pub(crate) async fn daily_usage_for_month(
         &self,
         name: impl Into<String>,
-        day: DateTime<Utc>,
+        instant: DateTime<Utc>,
         timezone: chrono_tz::Tz,
     ) -> DbResult<DailyUsageForMonth> {
         let name = name.into();
         self.send(|tx| DbCommand::DailyUsageForMonth {
             name,
-            day,
+            instant,
             timezone,
             tx,
         })
@@ -557,14 +557,14 @@ impl Task {
 
                 DbCommand::DailyUsageForMonth {
                     name,
-                    day,
+                    instant,
                     timezone,
                     tx,
                 } => {
                     let energy = db
                         .build_transaction()
                         .read_only()
-                        .run(|db| daily_usage_for_month(db, &name, day, timezone));
+                        .run(|db| daily_usage_for_month(db, &name, instant, timezone));
                     tx.send(energy).ok(/* Don't care if receiver is gone */);
                 }
 
@@ -1449,7 +1449,7 @@ define_sql_function! {
 fn daily_usage_for_month(
     db: &mut PgConnection,
     name: &str,
-    day: DateTime<Utc>,
+    instant: DateTime<Utc>,
     timezone: chrono_tz::Tz,
 ) -> QueryResult<DailyUsageForMonth> {
     #[derive(QueryableByName, FromSqlRow)]
@@ -1583,7 +1583,7 @@ fn daily_usage_for_month(
             "#
         ))
             .bind::<sql_types::BigInt, _>(charge_point_id)
-            .bind::<sql_types::Timestamptz, _>(day)
+            .bind::<sql_types::Timestamptz, _>(instant)
             .trace()
             .get_results::<DailyUsage>(db)
             .context(DailyUsageForMonthSnafu)

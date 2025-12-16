@@ -452,7 +452,7 @@ impl<'a> ChargePointPath<'a> {
         format!("{self}/configuration")
     }
 
-    fn usage_daily(self, params: Option<&UsageDailyForm>) -> String {
+    fn usage_daily(self, params: Option<&UsageForm>) -> String {
         let mut p = format!("{self}/usage/daily");
         if let Some(params) = params {
             let link = serde_urlencoded::to_string(params).unwrap();
@@ -921,9 +921,9 @@ async fn charge_point_configuration_flash(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct UsageDailyForm {
+struct UsageForm {
     #[serde(default)]
-    day: Option<DateTime<Utc>>,
+    instant: Option<DateTime<Utc>>,
     #[serde(default)]
     direction: Option<UsageDirection>,
 }
@@ -936,12 +936,12 @@ enum UsageDirection {
 }
 
 impl UsageDirection {
-    fn move_by_month(self, day: DateTime<Utc>) -> DateTime<Utc> {
+    fn move_by_month(self, instant: DateTime<Utc>) -> DateTime<Utc> {
         let month = chrono::Months::new(1);
 
         match self {
-            UsageDirection::Prev => day - month,
-            UsageDirection::Next => day + month,
+            UsageDirection::Prev => instant - month,
+            UsageDirection::Next => instant + month,
         }
     }
 }
@@ -952,16 +952,16 @@ async fn charge_point_usage_daily(
     turbo_frame_id: Option<TypedHeader<TurboFrame>>,
     State(db): State<Db>,
     State(backchannels): State<Backchannels>,
-    Form(form): Form<UsageDailyForm>,
+    Form(form): Form<UsageForm>,
 ) -> Result<impl IntoResponse> {
-    let day = form.day.unwrap_or_else(Utc::now);
+    let instant = form.instant.unwrap_or_else(Utc::now);
 
     let connected = backchannels.has(&name);
 
     let timezone = current_timezone(&cookies);
 
     let daily_usage = db
-        .daily_usage_for_month(&name, day, timezone)
+        .daily_usage_for_month(&name, instant, timezone)
         .await
         .unwrap();
 
@@ -971,10 +971,8 @@ async fn charge_point_usage_daily(
 
     let daily_usage_data = serde_json::to_string(&daily_usage).unwrap();
 
-    // TODO: file issue that lazy + data-turbo-stream should send accepts header
-
     let chart = || {
-        let month_year = day.format("%B %Y");
+        let month_year = instant.format("%B %Y");
 
         html! {
             section
@@ -998,21 +996,21 @@ async fn charge_point_usage_daily(
         }
     };
 
-    let make_placeholder = |day: DateTime<Utc>, direction: UsageDirection| {
-        let day = direction.move_by_month(day);
+    let make_placeholder = |instant: DateTime<Utc>, direction: UsageDirection| {
+        let instant = direction.move_by_month(instant);
 
-        let src = path.usage_daily(Some(&UsageDailyForm {
-            day: Some(day),
+        let src = path.usage_daily(Some(&UsageForm {
+            instant: Some(instant),
             direction: Some(direction),
         }));
 
         move || {
             html! {
-                turbo-frame #(day)."hidden".(CHART_CLASS)."grid"."place-items-center" src=(src) loading="lazy" {
+                turbo-frame #(instant)."hidden".(CHART_CLASS)."grid"."place-items-center" src=(src) loading="lazy" {
                     div."grid"."justify-items-center" {
                         span {
                             "Loading ";
-                            (day);
+                            (instant);
                         };
                         div.(LOADER_CLASS) {};
                     };
@@ -1022,16 +1020,16 @@ async fn charge_point_usage_daily(
     };
 
     let [prev_placeholder, next_placeholder] =
-        [UsageDirection::Prev, UsageDirection::Next].map(|d| make_placeholder(day, d));
+        [UsageDirection::Prev, UsageDirection::Next].map(|d| make_placeholder(instant, d));
 
     if turbo_frame_id.is_some() {
         let stream = my_response::TurboStream::default();
         let stream = match form.direction {
-            Some(UsageDirection::Prev) => stream.before(day, prev_placeholder()),
-            Some(UsageDirection::Next) => stream.after(day, next_placeholder()),
+            Some(UsageDirection::Prev) => stream.before(instant, prev_placeholder()),
+            Some(UsageDirection::Next) => stream.after(instant, next_placeholder()),
             None => stream,
         };
-        let stream = stream.replace(day, chart());
+        let stream = stream.replace(instant, chart());
 
         Ok(stream.into_response())
     } else {
