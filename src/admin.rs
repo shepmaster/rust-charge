@@ -53,7 +53,10 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             "/charge_points/{name}/configuration",
             post(charge_point_configuration_update),
         )
-        .route("/charge_points/{name}/usage", get(charge_point_usage))
+        .route(
+            "/charge_points/{name}/usage/daily",
+            get(charge_point_usage_daily),
+        )
         .route(
             "/charge_points/{name}/usage/events",
             get(charge_point_usage_events),
@@ -449,8 +452,8 @@ impl<'a> ChargePointPath<'a> {
         format!("{self}/configuration")
     }
 
-    fn usage(self, params: Option<&UsageForm>) -> String {
-        let mut p = format!("{self}/usage");
+    fn usage_daily(self, params: Option<&UsageDailyForm>) -> String {
+        let mut p = format!("{self}/usage/daily");
         if let Some(params) = params {
             let link = serde_urlencoded::to_string(params).unwrap();
             p.push('?');
@@ -460,9 +463,7 @@ impl<'a> ChargePointPath<'a> {
     }
 
     fn usage_events(self) -> String {
-        let mut p = self.usage(None);
-        p.push_str("/events");
-        p
+        format!("{self}/usage/events")
     }
 
     fn transaction(self) -> String {
@@ -632,7 +633,7 @@ async fn charge_point(
 
                     ul {
                         li { a href=(&path.configuration()) { "Configuration" } };
-                        li { a href=(&path.usage(None)) { "Usage" } };
+                        li { a href=(&path.usage_daily(None)) { "Daily Usage" } };
                     };
 
                     form."flex"."space-x-1" action=(path.reset()) method="post" data-turbo="true" {
@@ -920,7 +921,7 @@ async fn charge_point_configuration_flash(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct UsageForm {
+struct UsageDailyForm {
     #[serde(default)]
     day: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -945,13 +946,13 @@ impl UsageDirection {
     }
 }
 
-async fn charge_point_usage(
+async fn charge_point_usage_daily(
     cookies: CookieJar,
     Path(name): Path<String>,
     turbo_frame_id: Option<TypedHeader<TurboFrame>>,
     State(db): State<Db>,
     State(backchannels): State<Backchannels>,
-    Form(form): Form<UsageForm>,
+    Form(form): Form<UsageDailyForm>,
 ) -> Result<impl IntoResponse> {
     let day = form.day.unwrap_or_else(Utc::now);
 
@@ -1000,7 +1001,7 @@ async fn charge_point_usage(
     let make_placeholder = |day: DateTime<Utc>, direction: UsageDirection| {
         let day = direction.move_by_month(day);
 
-        let src = path.usage(Some(&UsageForm {
+        let src = path.usage_daily(Some(&UsageDailyForm {
             day: Some(day),
             direction: Some(direction),
         }));
@@ -1064,7 +1065,6 @@ async fn charge_point_usage(
                     };
                 };
             };
-
 
             turbo-stream-source src=(path.usage_events());
         }).into_response())
