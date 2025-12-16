@@ -288,7 +288,7 @@ impl Db {
             tx,
         })
         .await?
-        .context(DailyUsageForMonth2Snafu)
+        .context(DailyUsageForMonthSnafu)
     }
 
     pub(crate) async fn current_transaction(
@@ -298,7 +298,7 @@ impl Db {
         let name = name.into();
         self.send(|tx| DbCommand::CurrentTransaction { name, tx })
             .await?
-            .context(CurrentTransaction2Snafu)
+            .context(CurrentTransactionSnafu)
     }
 
     pub(crate) async fn start_transaction(
@@ -350,7 +350,7 @@ impl Db {
             tx,
         })
         .await?
-        .context(AddSample2Snafu)
+        .context(AddSampleSnafu)
     }
 
     #[cfg(feature = "fake-data")]
@@ -374,7 +374,7 @@ impl Db {
         let name = name.into();
         self.send(|tx| DbCommand::FakeAddSample { name, tx })
             .await?
-            .context(FakeAddSample2Snafu)
+            .context(FakeAddSampleSnafu)
     }
 
     #[cfg(feature = "fake-data")]
@@ -447,13 +447,11 @@ pub(crate) enum DbError {
         source: QueryError,
     },
 
-    // TODO RENAME
-    DailyUsageForMonth2 {
+    DailyUsageForMonth {
         source: QueryError,
     },
 
-    // TODO RENAME
-    CurrentTransaction2 {
+    CurrentTransaction {
         source: QueryError,
     },
 
@@ -465,8 +463,7 @@ pub(crate) enum DbError {
         source: QueryError,
     },
 
-    // TODO RENAME
-    AddSample2 {
+    AddSample {
         source: QueryError,
     },
 
@@ -479,7 +476,7 @@ pub(crate) enum DbError {
         source: QueryError,
     },
     #[cfg(feature = "fake-data")]
-    FakeAddSample2 {
+    FakeAddSample {
         source: QueryError,
     },
     #[cfg(feature = "fake-data")]
