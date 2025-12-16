@@ -1068,8 +1068,8 @@ mod fake {
             .get_result::<TransactionId>(db)
             .context(FakeCompleteTransactionStartSnafu)?;
 
-        let mut rng = rand::thread_rng();
-        let n_samples = rng.gen_range(10..=20);
+        let mut rng = rand::rng();
+        let n_samples = rng.random_range(10..=20);
 
         add_samples(db, transaction_id, n_samples)?;
 
@@ -1139,7 +1139,7 @@ mod fake {
     ) -> QueryResult<()> {
         use schema::samples::{self, columns as s};
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let last = samples::table
             .select((dsl::max(s::meter), dsl::max(s::sampled_at)))
@@ -1154,8 +1154,8 @@ mod fake {
 
         let samples = (0..n_samples)
             .map(|_| {
-                last_meter += WattHours(rng.gen_range(10.0..=100.0));
-                last_sampled_at += Duration::seconds(rng.gen_range(110..=130));
+                last_meter += WattHours(rng.random_range(10.0..=100.0));
+                last_sampled_at += Duration::seconds(rng.random_range(110..=130));
 
                 (
                     s::transaction_id.eq(transaction_id),
