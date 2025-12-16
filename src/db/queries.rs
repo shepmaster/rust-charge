@@ -1,0 +1,1314 @@
+use chrono::{DateTime, Duration, Utc};
+use const_str::squish;
+use diesel::{
+    connection::DefaultLoadingMode,
+    debug_query, delete,
+    deserialize::FromSqlRow,
+    dsl, insert_into,
+    prelude::*,
+    query_builder::{DebugQuery, QueryId},
+    sql_types,
+};
+use itertools::Itertools;
+use serde::Serialize;
+use snafu::prelude::*;
+use std::fmt::Debug;
+use tracing::{instrument, trace, warn};
+
+use crate::{
+    db::{
+        schema, ChargePoint, ChargePointId, DataPoint, DataSet, RecentTransaction, TransactionId,
+        WattHours,
+    },
+    EventBus,
+};
+
+#[instrument(skip_all)]
+pub fn ensure_charge_point(db: &mut PgConnection, name: &str) -> QueryResult<ChargePoint> {
+    use schema::charge_points::{self, columns as cp};
+
+    let charge_point = insert_into(charge_points::table)
+        .values(cp::name.eq(name))
+        .on_conflict_do_nothing()
+        .returning(ChargePoint::as_select())
+        .trace()
+        .get_result(db)
+        .optional()
+        .context(EnsureChargePointInsertSnafu)?;
+
+    // `ON CONFLICT DO NOTHING` returns nothing on conflict
+    match charge_point {
+        Some(cp) => Ok(cp),
+        None => charge_points::table
+            .filter(cp::name.eq(name))
+            .select(ChargePoint::as_select())
+            .trace()
+            .get_result(db)
+            .context(EnsureChargePointSelectSnafu),
+    }
+}
+
+#[instrument(skip_all)]
+pub fn saw_charge_point(db: &mut PgConnection, name: &str) -> QueryResult<ChargePoint> {
+    use schema::charge_points::{self, columns as cp};
+
+    insert_into(charge_points::table)
+        .values((cp::name.eq(name), cp::last_seen_at.eq(dsl::now)))
+        .on_conflict(cp::name)
+        .do_update()
+        .set(cp::last_seen_at.eq(dsl::now))
+        .returning(ChargePoint::as_select())
+        .trace()
+        .get_result(db)
+        .context(SawChargePointSnafu)
+}
+
+#[instrument(skip_all)]
+pub fn list_charge_points(db: &mut PgConnection) -> QueryResult<Vec<ChargePoint>> {
+    use schema::charge_points::{self, columns as cp};
+
+    charge_points::table
+        .order_by(cp::name)
+        .select(ChargePoint::as_select())
+        .trace()
+        .get_results(db)
+        .context(ListChargePointsSnafu)
+}
+
+#[instrument(skip_all)]
+pub fn current_transaction(
+    db: &mut PgConnection,
+    name: &str,
+) -> QueryResult<Option<TransactionId>> {
+    use schema::charge_points::{self, columns as cp};
+    use schema::current_transactions::{self, columns as curr};
+
+    charge_points::table
+        .inner_join(current_transactions::table)
+        .filter(cp::name.eq(name))
+        .select(curr::transaction_id)
+        .trace()
+        .get_result(db)
+        .optional()
+        .context(CurrentTransactionSnafu)
+}
+
+fn move_current_transaction_to_complete_transaction(
+    db: &mut PgConnection,
+    charge_point_id: ChargePointId,
+) -> Result<(), MoveCurrentToCompleteError> {
+    use schema::current_transactions::columns as curr;
+
+    move_current_transaction_to_complete_transaction_common(db, {
+        curr::charge_point_id.eq(charge_point_id)
+    })
+}
+
+fn move_specific_current_transaction_to_complete_transaction(
+    db: &mut PgConnection,
+    charge_point_id: ChargePointId,
+    transaction_id: TransactionId,
+) -> Result<(), MoveCurrentToCompleteError> {
+    use schema::current_transactions::columns as curr;
+
+    move_current_transaction_to_complete_transaction_common(db, {
+        let cp = curr::charge_point_id.eq(charge_point_id);
+        let tx = curr::transaction_id.eq(transaction_id);
+
+        cp.and(tx)
+    })
+}
+
+fn move_current_transaction_to_complete_transaction_common<Predicate>(
+    db: &mut PgConnection,
+    filter: Predicate,
+) -> Result<(), MoveCurrentToCompleteError>
+where
+    Predicate: BoxableExpression<
+        schema::current_transactions::table,
+        diesel::pg::Pg,
+        SqlType = diesel::sql_types::Bool,
+    >,
+    Predicate: QueryId,
+{
+    use move_current_to_complete_error::*;
+    use schema::complete_transactions::{self, columns as comp};
+    use schema::current_transactions::{self, columns as curr};
+
+    let r: Option<(ChargePointId, TransactionId)> = delete(current_transactions::table)
+        .filter(filter)
+        .returning((curr::charge_point_id, curr::transaction_id))
+        .trace()
+        .get_result(db)
+        .optional()
+        .context(DeleteSnafu)?;
+
+    let Some((charge_point_id, transaction_id)) = r else {
+        return Ok(());
+    };
+
+    insert_into(complete_transactions::table)
+        .values((
+            comp::charge_point_id.eq(charge_point_id),
+            comp::transaction_id.eq(transaction_id),
+        ))
+        .trace()
+        .execute(db)
+        .context(InsertSnafu)
+        .map(drop)
+}
+
+#[derive(Debug, Snafu)]
+#[snafu(module)]
+pub enum MoveCurrentToCompleteError {
+    Delete { source: diesel::result::Error },
+
+    Insert { source: diesel::result::Error },
+}
+
+#[instrument(skip_all)]
+pub fn start_transaction(
+    db: &mut PgConnection,
+    event_bus: &mut EventBus,
+    name: &str,
+    meter_start: WattHours,
+    timestamp: DateTime<Utc>,
+) -> QueryResult<TransactionId> {
+    use schema::current_transactions::{self, columns as curr};
+
+    let charge_point = ensure_charge_point(db, name)?;
+
+    move_current_transaction_to_complete_transaction(db, charge_point.id)
+        .context(StartTransactionMoveSnafu)?;
+
+    let id = start_transaction_raw(db)?;
+
+    add_sample(db, event_bus, id, meter_start, timestamp)?;
+
+    insert_into(current_transactions::table)
+        .values((
+            curr::charge_point_id.eq(charge_point.id),
+            curr::transaction_id.eq(id),
+        ))
+        .trace()
+        .execute(db)
+        .context(StartTransactionCurrentSnafu)?;
+
+    Ok(id)
+}
+
+fn start_transaction_raw(db: &mut PgConnection) -> QueryResult<TransactionId> {
+    use schema::transactions::{self, columns as t};
+
+    insert_into(transactions::table)
+        .default_values()
+        .returning(t::id)
+        .trace()
+        .get_result(db)
+        .context(StartTransactionTransactionSnafu)
+}
+
+#[instrument(skip_all)]
+pub fn add_sample(
+    db: &mut PgConnection,
+    event_bus: &mut EventBus,
+    id: TransactionId,
+    meter: WattHours,
+    sampled_at: DateTime<Utc>,
+) -> QueryResult<()> {
+    if let Err(e) = check_sample_consistency(db, id, meter, sampled_at) {
+        warn!("Sample consistency check failed: {e} {e:?}");
+        event_bus.transaction_sample_inconsistent(e);
+        return Ok(());
+    }
+
+    add_sample_raw(db, id, meter, sampled_at)
+}
+
+#[instrument(skip_all)]
+fn add_sample_raw(
+    db: &mut PgConnection,
+    id: TransactionId,
+    meter: WattHours,
+    sampled_at: DateTime<Utc>,
+) -> QueryResult<()> {
+    use schema::samples::{self, columns as s};
+
+    insert_into(samples::table)
+        .values((
+            s::transaction_id.eq(id),
+            s::meter.eq(meter),
+            s::sampled_at.eq(sampled_at),
+        ))
+        .trace()
+        .execute(db)
+        .context(AddSampleSnafu)
+        .map(drop)
+}
+
+// The Kia Niro PHEV battery is 11.1 kWh; 110% (12.2 kWh) gives a
+// little flexibility.
+const BATTERY_LIMIT: WattHours = WattHours(12_200.0);
+
+/// Report if a new sample makes sense to add to the database.
+///
+/// 1. When the power goes out, we start recording samples that claim
+///    to be from time = 0 (1970). Presumably the EVSE clock is reset
+///    and hasn't had a chance to synchronize yet.
+///
+/// 2. We once started a charge when the service had gone down (the
+///    whole server powered off). The service was brought up after
+///    charging was complete. There was a big jump in meter values for
+///    the same transaction:
+///
+///    ```
+///       id   | transaction_id |   meter   |         sampled_at
+///    --------+----------------+-----------+----------------------------
+///     154210 |            270 |         0 | 2024-05-23 15:38:10.001+00
+///     154211 |            270 | 235018.62 | 2024-05-28 11:31:22.001+00
+///     ```
+///
+///    That value exceeds the battery capacity and it's not even possible
+///    to go that fast (we only charge at like 3.6 kWh anyway).
+#[instrument(skip_all)]
+fn check_sample_consistency(
+    db: &mut PgConnection,
+    id: TransactionId,
+    meter: WattHours,
+    sampled_at: DateTime<Utc>,
+) -> Result<(), ConsistencyError> {
+    use consistency_error::*;
+
+    #[derive(QueryableByName)]
+    struct ConsistencyRaw {
+        #[diesel(sql_type = sql_types::Timestamptz)]
+        now: chrono::DateTime<Utc>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Double>)]
+        start_meter: Option<WattHours>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>)]
+        start_sampled_at: Option<DateTime<Utc>>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Double>)]
+        end_meter: Option<WattHours>,
+
+        #[diesel(sql_type = sql_types::Nullable<sql_types::Timestamptz>)]
+        end_sampled_at: Option<DateTime<Utc>>,
+    }
+
+    let state = diesel::sql_query(squish!(
+        r#"WITH
+
+           time AS (
+             SELECT CURRENT_TIMESTAMP AS now
+           ),
+
+           range AS (
+             SELECT
+               first_value(meter) OVER w AS start_meter,
+               first_value(sampled_at) OVER w AS start_sampled_at,
+               last_value(meter) OVER w AS end_meter,
+               last_value(sampled_at) OVER w AS end_sampled_at
+             FROM samples
+             WHERE transaction_id = $1
+             WINDOW w AS (
+               PARTITION BY transaction_id
+               ORDER BY
+                 sampled_at ASC,
+                 id ASC
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+             )
+             LIMIT 1
+           )
+
+           SELECT time.*, range.*
+           FROM time
+           FULL JOIN range
+           ON true
+        "#
+    ))
+    .bind::<sql_types::Integer, _>(id)
+    .trace()
+    .get_result::<ConsistencyRaw>(db)
+    .context(QuerySnafu)?;
+
+    let half_width = Duration::minutes(30);
+    let range_start = state.now - half_width;
+    let range_end = state.now + half_width;
+
+    ensure!(
+        (range_start..range_end).contains(&sampled_at),
+        OtherTimeSnafu {
+            sampled_at,
+            range_start,
+            range_end,
+        },
+    );
+
+    let vals = (|| {
+        Some((
+            state.start_meter?,
+            state.start_sampled_at?,
+            state.end_meter?,
+            state.end_sampled_at?,
+        ))
+    })();
+
+    let Some((start_meter, _start_sampled_at, end_meter, end_sampled_at)) = vals else {
+        // This is the first sample
+        return Ok(());
+    };
+
+    ensure!(
+        sampled_at >= end_sampled_at,
+        BackwardsTimeSnafu {
+            sampled_at,
+            end_sampled_at,
+        },
+    );
+
+    ensure!(meter >= end_meter, BackwardsMeterSnafu { meter, end_meter });
+
+    let total = meter - start_meter;
+    ensure!(total <= BATTERY_LIMIT, OverchargeSnafu { total });
+
+    Ok(())
+}
+
+#[derive(Debug, Snafu)]
+#[snafu(module)]
+pub enum ConsistencyError {
+    #[snafu(display("Could not determine the transaction consistency information"))]
+    Query { source: diesel::result::Error },
+
+    #[snafu(display("New sample occurs at {sampled_at}, which is outside the current time of {range_start} to {range_end}"))]
+    OtherTime {
+        sampled_at: DateTime<Utc>,
+        range_start: DateTime<Utc>,
+        range_end: DateTime<Utc>,
+    },
+
+    #[snafu(display(
+        "New sample occurs at {sampled_at} before previous sample of {end_sampled_at}"
+    ))]
+    BackwardsTime {
+        sampled_at: DateTime<Utc>,
+        end_sampled_at: DateTime<Utc>,
+    },
+
+    #[snafu(display("New sample of {meter} is less than previous sample of {end_meter}"))]
+    BackwardsMeter {
+        meter: WattHours,
+        end_meter: WattHours,
+    },
+
+    #[snafu(display(
+        "New sample would result in a total charge of {total} (max is {BATTERY_LIMIT})"
+    ))]
+    Overcharge { total: WattHours },
+}
+
+#[instrument(skip_all)]
+pub fn stop_transaction(
+    db: &mut PgConnection,
+    event_bus: &mut EventBus,
+    name: &str,
+    transaction_id: TransactionId,
+    meter_stop: WattHours,
+    timestamp: DateTime<Utc>,
+) -> QueryResult<()> {
+    let charge_point = ensure_charge_point(db, name)?;
+
+    move_specific_current_transaction_to_complete_transaction(db, charge_point.id, transaction_id)
+        .context(StopTransactionMoveSnafu)?;
+
+    add_sample(db, event_bus, transaction_id, meter_stop, timestamp)
+}
+
+#[cfg(feature = "fake-data")]
+pub mod fake {
+    use chrono::Duration;
+    use rand::Rng;
+
+    use super::*;
+
+    #[instrument(skip_all)]
+    pub fn complete_transaction(db: &mut PgConnection, name: &str) -> QueryResult<()> {
+        use schema::complete_transactions::{self, columns as comp};
+        use schema::transactions::{self, columns as t};
+
+        let charge_point = ensure_charge_point(db, name)?;
+
+        let transaction_id = insert_into(transactions::table)
+            .default_values()
+            .returning(t::id)
+            .trace()
+            .get_result::<TransactionId>(db)
+            .context(FakeCompleteTransactionStartSnafu)?;
+
+        let mut rng = rand::rng();
+        let n_samples = rng.random_range(10..=20);
+
+        add_samples(db, transaction_id, n_samples)?;
+
+        insert_into(complete_transactions::table)
+            .values((
+                comp::charge_point_id.eq(charge_point.id),
+                comp::transaction_id.eq(transaction_id),
+            ))
+            .trace()
+            .execute(db)
+            .context(FakeCompleteTransactionEndSnafu)
+            .map(drop)
+    }
+
+    #[instrument(skip_all)]
+    pub fn start_transaction(db: &mut PgConnection, name: &str) -> QueryResult<()> {
+        use schema::current_transactions::{self, columns as curr};
+        use schema::transactions::{self, columns as t};
+
+        let charge_point = ensure_charge_point(db, name)?;
+
+        let transaction_id = insert_into(transactions::table)
+            .default_values()
+            .returning(t::id)
+            .trace()
+            .get_result(db)
+            .context(FakeStartTransactionTransactionSnafu)?;
+
+        add_samples(db, transaction_id, 1)?;
+
+        insert_into(current_transactions::table)
+            .values((
+                curr::charge_point_id.eq(charge_point.id),
+                curr::transaction_id.eq(transaction_id),
+            ))
+            .trace()
+            .execute(db)
+            .context(FakeStartTransactionCurrentSnafu)
+            .map(drop)
+    }
+
+    #[instrument(skip_all)]
+    pub fn add_sample(db: &mut PgConnection, name: &str) -> QueryResult<()> {
+        use schema::current_transactions::{self, columns as curr};
+
+        let charge_point = ensure_charge_point(db, name)?;
+
+        let transaction_id = current_transactions::table
+            .select(curr::transaction_id)
+            .filter(curr::charge_point_id.eq(charge_point.id))
+            .trace()
+            .get_result(db)
+            .optional()
+            .context(FakeAddSampleSnafu)?;
+
+        let Some(transaction_id) = transaction_id else {
+            return Ok(());
+        };
+
+        add_samples(db, transaction_id, 1)
+    }
+
+    fn add_samples(
+        db: &mut PgConnection,
+        transaction_id: TransactionId,
+        n_samples: usize,
+    ) -> QueryResult<()> {
+        use schema::samples::{self, columns as s};
+
+        let mut rng = rand::rng();
+
+        let last = samples::table
+            .select((dsl::max(s::meter), dsl::max(s::sampled_at)))
+            .trace()
+            .get_result(db)
+            .optional()
+            .context(FakeAddSamplesOldSnafu)?;
+
+        let (last_meter, last_sampled_at) = last.unwrap_or((None, None));
+        let mut last_meter: WattHours = last_meter.unwrap_or(WattHours(0.0));
+        let mut last_sampled_at: DateTime<Utc> = last_sampled_at.unwrap_or_default();
+
+        let samples = (0..n_samples)
+            .map(|_| {
+                last_meter += WattHours(rng.random_range(10.0..=100.0));
+                last_sampled_at += Duration::seconds(rng.random_range(110..=130));
+
+                (
+                    s::transaction_id.eq(transaction_id),
+                    s::meter.eq(last_meter),
+                    s::sampled_at.eq(last_sampled_at),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        insert_into(samples::table)
+            .values(samples)
+            .trace()
+            .execute(db)
+            .context(FakeAddSamplesNewSnafu)
+            .map(drop)
+    }
+
+    #[instrument(skip_all)]
+    pub fn end_transaction(db: &mut PgConnection, name: &str) -> QueryResult<()> {
+        let charge_point = ensure_charge_point(db, name)?;
+        move_current_transaction_to_complete_transaction(db, charge_point.id)
+            .context(FakeEndTransactionMoveSnafu)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ChargePointOverview {
+    pub summaries: TransactionSummaries,
+    pub comparison: EnergyComparison,
+}
+
+#[instrument(skip_all)]
+pub fn charge_point_overview(
+    db: &mut PgConnection,
+    name: &str,
+) -> QueryResult<ChargePointOverview> {
+    let charge_point_id = charge_point_id_for_name(db, name)?;
+    let Some(charge_point_id) = charge_point_id else {
+        return Ok(Default::default());
+    };
+
+    let transactions = recent_transactions(db, charge_point_id, 5)?;
+    let transaction_ids = transactions
+        .iter()
+        .map(|t| t.transaction_id())
+        .collect::<Vec<_>>();
+
+    // These queries could be done in parallel...
+    let summaries = transaction_summaries(db, &transactions, &transaction_ids)?;
+    let comparison = transaction_relative_usages(db, &transactions, &transaction_ids)?;
+
+    Ok(ChargePointOverview {
+        summaries,
+        comparison,
+    })
+}
+
+fn charge_point_id_for_name(
+    db: &mut PgConnection,
+    name: &str,
+) -> QueryResult<Option<ChargePointId>> {
+    use schema::charge_points::{self, columns as cp};
+
+    charge_points::table
+        .filter(cp::name.eq(name))
+        .select(cp::id)
+        .trace()
+        .get_result::<ChargePointId>(db)
+        .optional()
+        .context(ChargePointIdForNameSnafu)
+}
+
+fn recent_transactions(
+    db: &mut PgConnection,
+    charge_point_id: ChargePointId,
+    last_n: i16,
+) -> QueryResult<Vec<RecentTransaction>> {
+    #[derive(QueryableByName, FromSqlRow)]
+    pub struct RecentTransactionRaw {
+        #[diesel(sql_type = sql_types::Bool)]
+        pub is_current: bool,
+
+        #[diesel(sql_type = sql_types::Integer)]
+        pub transaction_id: TransactionId,
+    }
+
+    diesel::sql_query(squish!(
+        r#"WITH
+
+           all_transactions AS (
+             SELECT
+               true AS is_current,
+               charge_point_id,
+               transaction_id,
+               created_at
+             FROM current_transactions
+
+             UNION
+
+             SELECT
+               false AS is_current,
+               charge_point_id,
+               transaction_id,
+               created_at
+             FROM complete_transactions
+           ),
+
+           recent_transactions AS (
+             SELECT
+               is_current,
+               transaction_id
+             FROM all_transactions
+             WHERE
+               charge_point_id = $1
+             ORDER BY
+               created_at DESC
+             LIMIT $2
+           )
+
+           SELECT *
+           FROM recent_transactions
+           ORDER BY
+             transaction_id"#
+    ))
+    .bind::<sql_types::BigInt, _>(charge_point_id)
+    .bind::<sql_types::SmallInt, _>(last_n)
+    .trace()
+    .load_iter::<RecentTransactionRaw, DefaultLoadingMode>(db)
+    .context(RecentTransactionsSnafu)?
+    .map(|t| t.map(|t| RecentTransaction::new(t.transaction_id, t.is_current)))
+    .collect::<QueryResult<_, _>>()
+    .context(RecentTransactionsItemSnafu)
+}
+
+type TransactionSummaries = Vec<Summary>;
+
+#[derive(Debug)]
+pub struct Summary {
+    pub transaction_id: RecentTransaction,
+    pub starting_at: DateTime<Utc>,
+    pub ending_at: DateTime<Utc>,
+    pub starting_meter: WattHours,
+    pub ending_meter: WattHours,
+}
+
+impl Summary {
+    pub fn duration(&self) -> chrono::Duration {
+        self.ending_at - self.starting_at
+    }
+
+    pub fn usage(&self) -> WattHours {
+        self.ending_meter - self.starting_meter
+    }
+}
+
+#[instrument(skip_all)]
+fn transaction_summaries(
+    db: &mut PgConnection,
+    transactions: &[RecentTransaction],
+    transaction_ids: &[TransactionId],
+) -> QueryResult<TransactionSummaries> {
+    use schema::samples::{self, columns as s};
+
+    type SampleSummary = (
+        TransactionId,
+        DateTime<Utc>,
+        DateTime<Utc>,
+        WattHours,
+        WattHours,
+    );
+
+    let v = samples::table
+        .group_by(s::transaction_id)
+        .select((
+            s::transaction_id,
+            dsl::min(s::sampled_at).assume_not_null(),
+            dsl::max(s::sampled_at).assume_not_null(),
+            dsl::min(s::meter).assume_not_null(),
+            dsl::max(s::meter).assume_not_null(),
+        ))
+        .filter(s::transaction_id.eq_any(transaction_ids))
+        .order_by(s::transaction_id)
+        .get_results::<SampleSummary>(db)
+        .context(TransactionSummariesSnafu)?;
+
+    let v = transactions
+        .iter()
+        .zip(v)
+        .map(
+            |(&transaction_id, (_, starting_at, ending_at, starting_meter, ending_meter))| {
+                Summary {
+                    transaction_id,
+                    starting_at,
+                    ending_at,
+                    starting_meter,
+                    ending_meter,
+                }
+            },
+        )
+        .collect();
+
+    Ok(v)
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct EnergyComparison {
+    datasets: Vec<DataSet<i64, f64>>,
+}
+
+#[instrument(skip_all)]
+fn transaction_relative_usages(
+    db: &mut PgConnection,
+    transactions: &[RecentTransaction],
+    transaction_ids: &[TransactionId],
+) -> QueryResult<EnergyComparison> {
+    #[derive(QueryableByName, FromSqlRow)]
+    pub struct RelativeSample {
+        #[diesel(sql_type = sql_types::Integer)]
+        pub transaction_id: TransactionId,
+        #[diesel(sql_type = sql_types::Double)]
+        pub meter: WattHours,
+        #[diesel(sql_type = sql_types::BigInt)]
+        pub time: i64,
+    }
+
+    // This computes the difference from the start of the
+    // transaction for both sample time and watthour. This allows
+    // us to compare different transactions directly.
+    let samples = diesel::sql_query(squish!(
+        r#"SELECT
+             transaction_id,
+             meter - first_value(meter) OVER w AS meter,
+             date_part('epoch', sampled_at - first_value(sampled_at) OVER w)::bigint AS time
+           FROM
+             samples
+           WHERE
+             transaction_id = ANY($1)
+           WINDOW w AS (
+             PARTITION BY transaction_id
+             ORDER BY sampled_at
+           )
+           ORDER BY
+             transaction_id,
+             sampled_at"#
+    ))
+    .bind::<sql_types::Array<sql_types::Integer>, _>(transaction_ids)
+    .trace()
+    .get_results::<RelativeSample>(db)
+    .context(RelativeUsagesSnafu)?;
+
+    let group = samples.into_iter().chunk_by(|s| s.transaction_id);
+
+    // Relies on the transaction id ordering matching
+    let raw_datasets = group.into_iter().zip(transactions);
+
+    let datasets = raw_datasets
+        .map(|((_, samples), transaction_id)| {
+            let label = transaction_id.to_string();
+
+            // Samples are already sorted by the DB, we just preserve them.
+            let data = samples
+                .map(|s| DataPoint {
+                    x: s.time,
+                    y: s.meter.0,
+                })
+                .collect();
+
+            DataSet { label, data }
+        })
+        .collect();
+
+    Ok(EnergyComparison { datasets })
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct DailyUsageForMonth {
+    datasets: Option<[DataSet<DateTime<Utc>, WattHours>; 1]>,
+}
+
+impl DailyUsageForMonth {
+    pub fn total(&self) -> WattHours {
+        match &self.datasets {
+            Some(v) => v[0].data.iter().map(|d| d.y).sum(),
+            None => WattHours::ZERO,
+        }
+    }
+}
+
+define_sql_function! {
+    fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
+}
+
+#[instrument(skip_all)]
+pub fn daily_usage_for_month(
+    db: &mut PgConnection,
+    name: &str,
+    instant: DateTime<Utc>,
+    timezone: chrono_tz::Tz,
+) -> QueryResult<DailyUsageForMonth> {
+    #[derive(QueryableByName, FromSqlRow)]
+    struct DailyUsage {
+        #[diesel(sql_type = sql_types::Timestamptz)]
+        pub day: DateTime<Utc>,
+        #[diesel(sql_type = sql_types::Double)]
+        pub usage: WattHours,
+    }
+
+    let charge_point_id = charge_point_id_for_name(db, name)?;
+    let Some(charge_point_id) = charge_point_id else {
+        return Ok(Default::default());
+    };
+
+    let samples = db.transaction(|db| {
+        let timezone = timezone.to_string();
+        diesel::select(set_config("timezone", timezone, true)).trace().execute(db).context(DailyUsageForMonthTimezoneSnafu)?;
+
+        // This takes all the samples, splitting them when they cross the
+        // boundary between days, then sums up the usage by day in a
+        // calendar month.
+        //
+        // Could maybe add some pre-filtering of sample data by a
+        // loose date range. It needs to be a little beyond the month
+        // ranges in order to capture any transactions cross the
+        // boundary.
+        diesel::sql_query(squish!(
+            r#"
+            WITH
+
+            all_transactions AS (
+              SELECT
+                transaction_id,
+                charge_point_id
+              FROM current_transactions
+
+              UNION
+
+              SELECT
+                transaction_id,
+                charge_point_id
+              FROM complete_transactions
+            ),
+
+            our_samples AS (
+              SELECT samples.*
+              FROM samples
+              INNER JOIN all_transactions ON all_transactions.transaction_id = samples.transaction_id
+              WHERE all_transactions.charge_point_id = $1
+            ),
+
+            raw_sample_deltas AS (
+              SELECT
+                transaction_id,
+                LAG(sampled_at) OVER(w) AS prev_sampled_at,
+                sampled_at,
+                LAG(meter) OVER(w) AS prev_meter,
+                meter
+              FROM our_samples
+              WINDOW w AS (
+                PARTITION BY transaction_id
+                ORDER BY sampled_at
+              )
+            ),
+
+            sample_deltas AS (
+              SELECT
+                transaction_id,
+                prev_sampled_at,
+                sampled_at,
+                meter - prev_meter AS meter_delta
+              FROM raw_sample_deltas
+              WHERE prev_sampled_at IS NOT NULL
+              AND sampled_at <> prev_sampled_at
+            ),
+
+            sample_deltas_split_on_day_crossing AS (
+              SELECT *
+              FROM sample_deltas
+
+              JOIN LATERAL (
+                SELECT
+                  meter_delta / extract(epoch FROM (sampled_at - prev_sampled_at)) AS rate,
+                  generate_series(
+                    date_trunc('day', sample_deltas.prev_sampled_at),
+                    date_trunc('day', sample_deltas.sampled_at),
+                    '1 day'::interval
+                  ) AS day_start
+              ) l1 ON true
+
+              JOIN LATERAL (
+                SELECT
+                  greatest(sample_deltas.prev_sampled_at, day_start) AS effective_prev_sampled_at,
+                  least(sample_deltas.sampled_at, day_start + '1 day'::interval) AS effective_sampled_at
+              ) l2 ON true
+
+              JOIN LATERAL (
+                SELECT
+                  extract(epoch FROM effective_sampled_at - effective_prev_sampled_at) * rate AS effective_meter_delta
+              ) l3 ON true
+            ),
+
+            usage_by_day AS (
+              SELECT
+                day_start,
+                sum(effective_meter_delta) AS usage
+              FROM sample_deltas_split_on_day_crossing
+              GROUP BY day_start
+            ),
+
+            this_month AS (
+              SELECT
+                generate_series(
+                  date_trunc('month', $2),
+                  date_trunc('month', $2) + '1 month'::interval - '1 day'::interval,
+                  '1 day'::interval
+                ) AS day
+            ),
+
+            usage_this_month AS (
+              SELECT
+                this_month.day,
+                coalesce(usage_by_day.usage, 0) AS usage
+              FROM this_month
+              LEFT JOIN usage_by_day ON usage_by_day.day_start = this_month.day
+              ORDER BY day
+            )
+
+            SELECT * FROM usage_this_month
+            "#
+        ))
+            .bind::<sql_types::BigInt, _>(charge_point_id)
+            .bind::<sql_types::Timestamptz, _>(instant)
+            .trace()
+            .get_results::<DailyUsage>(db)
+            .context(DailyUsageForMonthSnafu)
+    })?;
+
+    let datasets = Some([DataSet {
+        label: "Daily usage".into(),
+        data: samples
+            .into_iter()
+            .map(|s| DataPoint {
+                x: s.day,
+                y: s.usage,
+            })
+            .collect(),
+    }]);
+
+    Ok(DailyUsageForMonth { datasets })
+}
+
+#[derive(Debug, Snafu)]
+pub enum QueryError {
+    // This is used for multiple specific transactions -- should we
+    // split those up?
+    #[snafu(context(false))]
+    Transaction {
+        source: diesel::result::Error,
+    },
+
+    EnsureChargePointInsert {
+        source: diesel::result::Error,
+    },
+
+    EnsureChargePointSelect {
+        source: diesel::result::Error,
+    },
+
+    SawChargePoint {
+        source: diesel::result::Error,
+    },
+
+    ListChargePoints {
+        source: diesel::result::Error,
+    },
+
+    CurrentTransaction {
+        source: diesel::result::Error,
+    },
+
+    StartTransactionMove {
+        source: MoveCurrentToCompleteError,
+    },
+
+    StartTransactionTransaction {
+        source: diesel::result::Error,
+    },
+
+    StartTransactionCurrent {
+        source: diesel::result::Error,
+    },
+
+    AddSample {
+        source: diesel::result::Error,
+    },
+
+    StopTransactionMove {
+        source: MoveCurrentToCompleteError,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeCompleteTransactionStart {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeCompleteTransactionEnd {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeStartTransactionTransaction {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeStartTransactionCurrent {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeAddSample {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeAddSamplesOld {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeAddSamplesNew {
+        source: diesel::result::Error,
+    },
+
+    #[cfg(feature = "fake-data")]
+    FakeEndTransactionMove {
+        source: MoveCurrentToCompleteError,
+    },
+
+    ChargePointIdForName {
+        source: diesel::result::Error,
+    },
+
+    RecentTransactions {
+        source: diesel::result::Error,
+    },
+
+    RecentTransactionsItem {
+        source: diesel::result::Error,
+    },
+
+    TransactionSummaries {
+        source: diesel::result::Error,
+    },
+
+    RelativeUsages {
+        source: diesel::result::Error,
+    },
+
+    DailyUsageForMonthTimezone {
+        source: diesel::result::Error,
+    },
+
+    DailyUsageForMonth {
+        source: diesel::result::Error,
+    },
+}
+
+pub type QueryResult<T, E = QueryError> = std::result::Result<T, E>;
+
+trait TraceQuery {
+    fn trace(self) -> Self;
+}
+
+impl<T> TraceQuery for T
+where
+    for<'a> DebugQuery<'a, T, diesel::pg::Pg>: Debug,
+{
+    fn trace(self) -> Self {
+        trace!("{:?}", debug_query(&self));
+        self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{
+        env,
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Once,
+        },
+    };
+
+    use crate::init_tracing;
+
+    use super::super::init;
+    use super::*;
+
+    fn setup() {
+        static SETUP: Once = Once::new();
+
+        SETUP.call_once(|| {
+            dotenvy::from_filename(".env.test").ok();
+            dotenvy::from_filename(".env").ok();
+
+            init_tracing();
+        })
+    }
+
+    fn init_db() -> PgConnection {
+        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        init(&database_url).unwrap()
+    }
+
+    fn gen_charge_point_name() -> String {
+        static ID: AtomicU64 = AtomicU64::new(0);
+        let id = ID.fetch_add(1, Ordering::SeqCst);
+        format!("Charge Point {id}")
+    }
+
+    #[test]
+    fn ensure_charge_point() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+
+            let charge_point1 = super::ensure_charge_point(db, name).unwrap();
+            assert!(charge_point1.id > ChargePointId(0));
+            assert_eq!(&charge_point1.name, name);
+
+            let charge_point2 = super::ensure_charge_point(db, name).unwrap();
+            assert_eq!(charge_point2, charge_point1);
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn saw_charge_point() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let name = &gen_charge_point_name();
+
+            let charge_point1 = super::saw_charge_point(db, name).unwrap();
+            let charge_point2 = super::saw_charge_point(db, name).unwrap();
+
+            // Since we are inside a transaction, the time doesn't actually change
+            assert_eq!(charge_point2, charge_point1);
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    // #[test]
+    // fn samples_are_collected() {
+    //     setup();
+    //     let mut db = init_db();
+
+    //     db.test_transaction(|db| {
+    //         let name = &gen_charge_point_name();
+
+    //         let id = start_transaction(db, name, WattHours(100), Utc::now());
+    //         add_sample(db, id, WattHours(125), Utc::now());
+    //         stop_transaction(db, id, WattHours(200), Utc::now());
+
+    //         let r = raw_transaction_energy_rate(db, id);
+    //         let deltas = r.iter().map(|u| u.delta_meter).collect::<Vec<_>>();
+
+    //         assert_eq!(deltas, [25, 75]);
+
+    //         Ok::<_, ()>(())
+    //     })
+    // }
+
+    #[test]
+    fn inconsistent_far_in_the_past() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let now = Utc::now();
+
+            let t = super::start_transaction_raw(db).unwrap();
+
+            let far_past = now - Duration::days(1);
+            let e =
+                super::check_sample_consistency(db, t, WattHours(234.567), far_past).unwrap_err();
+            assert!(matches!(e, ConsistencyError::OtherTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_far_in_the_future() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let now = Utc::now();
+
+            let t = super::start_transaction_raw(db).unwrap();
+
+            let far_future = now + Duration::days(1);
+            let e =
+                super::check_sample_consistency(db, t, WattHours(234.567), far_future).unwrap_err();
+            assert!(matches!(e, ConsistencyError::OtherTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_time_goes_backwards() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let now = Utc::now();
+
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(123.456), now).unwrap();
+
+            let before = now - Duration::seconds(1);
+            let e = super::check_sample_consistency(db, t, WattHours(234.567), before).unwrap_err();
+            assert!(matches!(e, ConsistencyError::BackwardsTime { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_meter_goes_backwards() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let now = Utc::now();
+
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(123.456), now).unwrap();
+
+            let less = WattHours(123.000);
+            let e = super::check_sample_consistency(db, t, less, now).unwrap_err();
+            assert!(matches!(e, ConsistencyError::BackwardsMeter { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+
+    #[test]
+    fn inconsistent_overcharged() {
+        setup();
+        let mut db = init_db();
+
+        db.test_transaction(|db| {
+            let now = Utc::now();
+
+            let t = super::start_transaction_raw(db).unwrap();
+
+            super::add_sample_raw(db, t, WattHours(0.0), now).unwrap();
+
+            let more = WattHours(1_000_000.0);
+            let e = super::check_sample_consistency(db, t, more, now).unwrap_err();
+            assert!(matches!(e, ConsistencyError::Overcharge { .. }));
+
+            Ok::<_, ()>(())
+        });
+    }
+}
