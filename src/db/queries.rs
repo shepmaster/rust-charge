@@ -31,8 +31,7 @@ pub fn ensure_charge_point(db: &mut PgConnection, name: &str) -> QueryResult<Cha
         .values(cp::name.eq(name))
         .on_conflict_do_nothing()
         .returning(ChargePoint::as_select())
-        .trace()
-        .get_result(db)
+        .trace_get_result(db)
         .optional()
         .context(EnsureChargePointInsertSnafu)?;
 
@@ -42,8 +41,7 @@ pub fn ensure_charge_point(db: &mut PgConnection, name: &str) -> QueryResult<Cha
         None => charge_points::table
             .filter(cp::name.eq(name))
             .select(ChargePoint::as_select())
-            .trace()
-            .get_result(db)
+            .trace_get_result(db)
             .context(EnsureChargePointSelectSnafu),
     }
 }
@@ -58,8 +56,7 @@ pub fn saw_charge_point(db: &mut PgConnection, name: &str) -> QueryResult<Charge
         .do_update()
         .set(cp::last_seen_at.eq(dsl::now))
         .returning(ChargePoint::as_select())
-        .trace()
-        .get_result(db)
+        .trace_get_result(db)
         .context(SawChargePointSnafu)
 }
 
@@ -70,8 +67,7 @@ pub fn list_charge_points(db: &mut PgConnection) -> QueryResult<Vec<ChargePoint>
     charge_points::table
         .order_by(cp::name)
         .select(ChargePoint::as_select())
-        .trace()
-        .get_results(db)
+        .trace_get_results(db)
         .context(ListChargePointsSnafu)
 }
 
@@ -87,8 +83,7 @@ pub fn current_transaction(
         .inner_join(current_transactions::table)
         .filter(cp::name.eq(name))
         .select(curr::transaction_id)
-        .trace()
-        .get_result(db)
+        .trace_get_result(db)
         .optional()
         .context(CurrentTransactionSnafu)
 }
@@ -138,8 +133,7 @@ where
     let r: Option<(ChargePointId, TransactionId)> = delete(current_transactions::table)
         .filter(filter)
         .returning((curr::charge_point_id, curr::transaction_id))
-        .trace()
-        .get_result(db)
+        .trace_get_result(db)
         .optional()
         .context(DeleteSnafu)?;
 
@@ -152,8 +146,7 @@ where
             comp::charge_point_id.eq(charge_point_id),
             comp::transaction_id.eq(transaction_id),
         ))
-        .trace()
-        .execute(db)
+        .trace_execute(db)
         .context(InsertSnafu)
         .map(drop)
 }
@@ -190,8 +183,7 @@ pub fn start_transaction(
             curr::charge_point_id.eq(charge_point.id),
             curr::transaction_id.eq(id),
         ))
-        .trace()
-        .execute(db)
+        .trace_execute(db)
         .context(StartTransactionCurrentSnafu)?;
 
     Ok(id)
@@ -203,8 +195,7 @@ fn start_transaction_raw(db: &mut PgConnection) -> QueryResult<TransactionId> {
     insert_into(transactions::table)
         .default_values()
         .returning(t::id)
-        .trace()
-        .get_result(db)
+        .trace_get_result(db)
         .context(StartTransactionTransactionSnafu)
 }
 
@@ -240,8 +231,7 @@ fn add_sample_raw(
             s::meter.eq(meter),
             s::sampled_at.eq(sampled_at),
         ))
-        .trace()
-        .execute(db)
+        .trace_execute(db)
         .context(AddSampleSnafu)
         .map(drop)
 }
@@ -329,8 +319,7 @@ fn check_sample_consistency(
         "#
     ))
     .bind::<sql_types::Integer, _>(id)
-    .trace()
-    .get_result::<ConsistencyRaw>(db)
+    .trace_get_result::<ConsistencyRaw>(db)
     .context(QuerySnafu)?;
 
     let half_width = Duration::minutes(30);
@@ -443,8 +432,7 @@ pub mod fake {
         let transaction_id = insert_into(transactions::table)
             .default_values()
             .returning(t::id)
-            .trace()
-            .get_result::<TransactionId>(db)
+            .trace_get_result::<TransactionId>(db)
             .context(FakeCompleteTransactionStartSnafu)?;
 
         let mut rng = rand::rng();
@@ -457,8 +445,7 @@ pub mod fake {
                 comp::charge_point_id.eq(charge_point.id),
                 comp::transaction_id.eq(transaction_id),
             ))
-            .trace()
-            .execute(db)
+            .trace_execute(db)
             .context(FakeCompleteTransactionEndSnafu)
             .map(drop)
     }
@@ -473,8 +460,7 @@ pub mod fake {
         let transaction_id = insert_into(transactions::table)
             .default_values()
             .returning(t::id)
-            .trace()
-            .get_result(db)
+            .trace_get_result(db)
             .context(FakeStartTransactionTransactionSnafu)?;
 
         add_samples(db, transaction_id, 1)?;
@@ -484,8 +470,7 @@ pub mod fake {
                 curr::charge_point_id.eq(charge_point.id),
                 curr::transaction_id.eq(transaction_id),
             ))
-            .trace()
-            .execute(db)
+            .trace_execute(db)
             .context(FakeStartTransactionCurrentSnafu)
             .map(drop)
     }
@@ -499,8 +484,7 @@ pub mod fake {
         let transaction_id = current_transactions::table
             .select(curr::transaction_id)
             .filter(curr::charge_point_id.eq(charge_point.id))
-            .trace()
-            .get_result(db)
+            .trace_get_result(db)
             .optional()
             .context(FakeAddSampleSnafu)?;
 
@@ -522,8 +506,7 @@ pub mod fake {
 
         let last = samples::table
             .select((dsl::max(s::meter), dsl::max(s::sampled_at)))
-            .trace()
-            .get_result(db)
+            .trace_get_result(db)
             .optional()
             .context(FakeAddSamplesOldSnafu)?;
 
@@ -546,8 +529,7 @@ pub mod fake {
 
         insert_into(samples::table)
             .values(samples)
-            .trace()
-            .execute(db)
+            .trace_execute(db)
             .context(FakeAddSamplesNewSnafu)
             .map(drop)
     }
@@ -601,8 +583,7 @@ fn charge_point_id_for_name(
     charge_points::table
         .filter(cp::name.eq(name))
         .select(cp::id)
-        .trace()
-        .get_result::<ChargePointId>(db)
+        .trace_get_result::<ChargePointId>(db)
         .optional()
         .context(ChargePointIdForNameSnafu)
 }
@@ -781,8 +762,7 @@ fn transaction_relative_usages(
              sampled_at"#
     ))
     .bind::<sql_types::Array<sql_types::Integer>, _>(transaction_ids)
-    .trace()
-    .get_results::<RelativeSample>(db)
+    .trace_get_results::<RelativeSample>(db)
     .context(RelativeUsagesSnafu)?;
 
     let group = samples.into_iter().chunk_by(|s| s.transaction_id);
@@ -883,7 +863,7 @@ fn division_usage_for_period(
 
     let samples = db.transaction(|db| {
         let timezone = timezone.to_string();
-        diesel::select(set_config("timezone", timezone, true)).trace().execute(db).context(DivisionUsageForPeriodTimezoneSnafu)?;
+        diesel::select(set_config("timezone", timezone, true)).trace_execute(db).context(DivisionUsageForPeriodTimezoneSnafu)?;
 
         // This takes all the samples, splitting them when they cross
         // the boundary between divisions, then sums up the usage by
@@ -1009,8 +989,7 @@ fn division_usage_for_period(
             .bind::<sql_types::Text, _>(division)
             .bind::<sql_types::Text, _>(one_period)
             .bind::<sql_types::Text, _>(period)
-            .trace()
-            .get_results::<DivisionUsage>(db)
+            .trace_get_results::<DivisionUsage>(db)
             .context(DivisionUsageForPeriodSnafu)
     })?;
 
@@ -1160,6 +1139,66 @@ where
         trace!("{:?}", debug_query(&self));
         self
     }
+}
+
+trait TraceRunQueryDsl<Conn> {
+    fn trace_execute(self, conn: &mut Conn) -> diesel::QueryResult<usize>
+    where
+        Conn: Connection,
+        Self: diesel::query_dsl::methods::ExecuteDsl<Conn>;
+
+    fn trace_get_result<'query, U>(self, conn: &mut Conn) -> diesel::QueryResult<U>
+    where
+        Self: diesel::query_dsl::methods::LoadQuery<'query, Conn, U>;
+
+    fn trace_get_results<'query, U>(self, conn: &mut Conn) -> diesel::QueryResult<Vec<U>>
+    where
+        Self: diesel::query_dsl::methods::LoadQuery<'query, Conn, U>;
+}
+
+impl<T, Conn> TraceRunQueryDsl<Conn> for T
+where
+    T: diesel::RunQueryDsl<Conn>,
+    for<'a> DebugQuery<'a, T, diesel::pg::Pg>: Debug,
+{
+    fn trace_execute(self, conn: &mut Conn) -> diesel::QueryResult<usize>
+    where
+        Conn: Connection,
+        Self: diesel::query_dsl::methods::ExecuteDsl<Conn>,
+    {
+        trace_wrapper(self, |q| q.execute(conn))
+    }
+
+    fn trace_get_result<'query, U>(self, conn: &mut Conn) -> diesel::QueryResult<U>
+    where
+        Self: diesel::query_dsl::methods::LoadQuery<'query, Conn, U>,
+    {
+        trace_wrapper(self, |q| q.get_result(conn))
+    }
+
+    fn trace_get_results<'query, U>(self, conn: &mut Conn) -> diesel::QueryResult<Vec<U>>
+    where
+        Self: diesel::query_dsl::methods::LoadQuery<'query, Conn, U>,
+    {
+        trace_wrapper(self, |q| q.get_results(conn))
+    }
+}
+
+fn trace_wrapper<Q, T, E>(query: Q, f: impl FnOnce(Q) -> Result<T, E>) -> Result<T, E>
+where
+    for<'a> DebugQuery<'a, Q, diesel::pg::Pg>: Debug,
+{
+    let q_txt = format!("{:?}", debug_query(&query));
+
+    let now = std::time::Instant::now();
+    let r = f(query);
+    let elapsed = now.elapsed();
+
+    let success = if r.is_ok() { "success" } else { "failure" };
+
+    trace!("{q_txt} in {elapsed:?} ({success})");
+
+    r
 }
 
 #[cfg(test)]
