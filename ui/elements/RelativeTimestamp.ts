@@ -1,11 +1,10 @@
-import { Controller } from "@hotwired/stimulus";
 import { intlFormatDistance } from "date-fns";
 
-export default class RelativeTimestampController extends Controller<HTMLSpanElement> {
+export default class RelativeTimestamp extends HTMLElement {
   private now: Date = new Date();
   private update: number | undefined = undefined;
 
-  connect() {
+  connectedCallback() {
     if (!this.originalDate()) {
       return;
     }
@@ -21,7 +20,7 @@ export default class RelativeTimestampController extends Controller<HTMLSpanElem
   }
 
   originalDate() {
-    return this.element.title || this.element.textContent;
+    return this.title || this.textContent;
   }
 
   render() {
@@ -32,11 +31,11 @@ export default class RelativeTimestampController extends Controller<HTMLSpanElem
 
     const then = Date.parse(originalDate);
     const pretty = intlFormatDistance(then, this.now);
-    this.element.textContent = pretty;
-    this.element.title = originalDate;
+    this.textContent = pretty;
+    this.title = originalDate;
   }
 
-  disconnect() {
+  disconnectedCallback() {
     if (this.update) {
       window.clearInterval(this.update);
     }

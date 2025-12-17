@@ -156,7 +156,7 @@ struct RelativeTimestamp(DateTime<Utc>);
 impl maud::Render for RelativeTimestamp {
     fn render(&self) -> Markup {
         html! {
-            span data-controller="relative-timestamp" {
+            rc-relative-timestamp {
                 (self.0.to_rfc3339())
             }
         }

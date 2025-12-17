@@ -6,7 +6,7 @@ import DivisionUsageForPeriodChartController from "./controllers/division_usage_
 import Duration from "./elements/Duration";
 import FlashNotificationController from "./controllers/flash_notification_controller";
 import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
-import RelativeTimestampController from "./controllers/relative_timestamp_controller";
+import RelativeTimestamp from "./elements/RelativeTimestamp";
 import RelativeUsageChartController from "./controllers/relative_usage_chart_controller";
 
 interface TurboEventMap {
@@ -52,8 +52,8 @@ window.Stimulus.register(
 );
 window.Stimulus.register("flash-notification", FlashNotificationController);
 window.Stimulus.register("infinite-carousel", InfiniteCarouselController);
-window.Stimulus.register("relative-timestamp", RelativeTimestampController);
 window.Stimulus.register("relative-usage-chart", RelativeUsageChartController);
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
 window.customElements.define("rc-duration", Duration);
+window.customElements.define("rc-relative-timestamp", RelativeTimestamp);
