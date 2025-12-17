@@ -1,4 +1,3 @@
-import { Controller } from "@hotwired/stimulus";
 import {
   Chart,
   Legend,
@@ -46,23 +45,19 @@ const DataSchema = z.object({
     .array(),
 });
 
-export default class RelativeUsageChartController extends Controller<HTMLCanvasElement> {
-  static values = {
-    data: String,
-  };
+export default class RelativeUsageChart extends HTMLElement {
+  connectedCallback() {
+    const canvas = document.createElement("canvas");
+    this.appendChild(canvas);
 
-  declare dataValue: string;
-  declare readonly hasDataValue: boolean;
-
-  async connect() {
     const loader = makeLoader({
       schema: DataSchema,
       dataAttrName: "relativeUsageChartDataValue",
     });
 
-    const data = loader(this.element);
+    const data = loader(this);
 
-    const chart = new Chart(this.element, {
+    const chart = new Chart(canvas, {
       type: "line",
       data,
       plugins: [missingColorPlugin],
@@ -87,7 +82,7 @@ export default class RelativeUsageChartController extends Controller<HTMLCanvasE
       },
     });
 
-    this.element.addEventListener(
+    this.addEventListener(
       "rust-charge:update-inline",
       absorbNewData({ loader, chart }),
     );

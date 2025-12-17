@@ -737,8 +737,7 @@ fn overview_chart(overview: &ChargePointOverview) -> Markup {
 
     html! {
         div."relative".(CHART_CLASS) {
-            canvas #(CHARGE_POINT_CHART_ID)
-                data-controller="relative-usage-chart"
+            rc-relative-usage-chart #(CHARGE_POINT_CHART_ID)
                 data-relative-usage-chart-data-value=(comparison_data)
             {};
         }

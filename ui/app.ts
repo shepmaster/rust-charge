@@ -7,7 +7,7 @@ import Duration from "./elements/Duration";
 import FlashNotification from "./elements/FlashNotification";
 import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
 import RelativeTimestamp from "./elements/RelativeTimestamp";
-import RelativeUsageChartController from "./controllers/relative_usage_chart_controller";
+import RelativeUsageChart from "./elements/RelativeUsageChart";
 
 interface TurboEventMap {
   "turbo:before-stream-render": Turbo.TurboBeforeStreamRenderEvent;
@@ -47,7 +47,6 @@ Turbo.StreamActions["update-inline"] = function () {
 
 window.Stimulus = Application.start();
 window.Stimulus.register("infinite-carousel", InfiniteCarouselController);
-window.Stimulus.register("relative-usage-chart", RelativeUsageChartController);
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
 window.customElements.define(
@@ -57,3 +56,4 @@ window.customElements.define(
 window.customElements.define("rc-duration", Duration);
 window.customElements.define("rc-flash-notification", FlashNotification);
 window.customElements.define("rc-relative-timestamp", RelativeTimestamp);
+window.customElements.define("rc-relative-usage-chart", RelativeUsageChart);
