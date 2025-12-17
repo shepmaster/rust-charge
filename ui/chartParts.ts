@@ -71,6 +71,11 @@ const formatDay = (rawDateString: string): string => {
   return dateFnFormatDate(date, "dd");
 };
 
+const formatMonth = (rawDateString: string): string => {
+  const date = new Date(rawDateString);
+  return dateFnFormatDate(date, "MMM");
+};
+
 export const relativeTimeScale: ScaleOptions<"linear"> = {
   type: "linear",
   ticks: {
@@ -91,6 +96,22 @@ export const dateOnlyCategoryScale: ScaleOptions<"category"> = {
       }
       const originalLabel = this.getLabelForValue(tickValue);
       return formatDay(originalLabel);
+    },
+  },
+  title: {
+    display: false,
+  },
+};
+
+export const monthOnlyCategoryScale: ScaleOptions<"category"> = {
+  type: "category",
+  ticks: {
+    callback(tickValue) {
+      if (typeof tickValue === "string") {
+        return tickValue;
+      }
+      const originalLabel = this.getLabelForValue(tickValue);
+      return formatMonth(originalLabel);
     },
   },
   title: {
@@ -121,6 +142,9 @@ export const relativeTimeTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
 
 export const dateOnlyCategoryTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
   ctx.map((c) => formatDate(c.label));
+
+export const monthOnlyCategoryTooltip = <C extends OurTooltipItem>(ctx: C[]) =>
+  ctx.map((c) => formatMonth(c.label));
 
 export const wattHourTooltip = <C extends OurTooltipItem>(ctx: C) =>
   formatWattHours(ctx.parsed.y ?? 0);

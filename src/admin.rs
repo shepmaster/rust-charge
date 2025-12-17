@@ -58,6 +58,10 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             get(charge_point_usage_daily),
         )
         .route(
+            "/charge_points/{name}/usage/monthly",
+            get(charge_point_usage_monthly),
+        )
+        .route(
             "/charge_points/{name}/usage/events",
             get(charge_point_usage_events),
         )
@@ -453,7 +457,16 @@ impl<'a> ChargePointPath<'a> {
     }
 
     fn usage_daily(self, params: Option<&UsageForm>) -> String {
-        let mut p = format!("{self}/usage/daily");
+        let p = format!("{self}/usage/daily");
+        Self::usage_common(p, params)
+    }
+
+    fn usage_monthly(self, params: Option<&UsageForm>) -> String {
+        let p = format!("{self}/usage/monthly");
+        Self::usage_common(p, params)
+    }
+
+    fn usage_common(mut p: String, params: Option<&UsageForm>) -> String {
         if let Some(params) = params {
             let link = serde_urlencoded::to_string(params).unwrap();
             p.push('?');
@@ -634,6 +647,7 @@ async fn charge_point(
                     ul {
                         li { a href=(&path.configuration()) { "Configuration" } };
                         li { a href=(&path.usage_daily(None)) { "Daily Usage" } };
+                        li { a href=(&path.usage_monthly(None)) { "Monthly Usage" } };
                     };
 
                     form."flex"."space-x-1" action=(path.reset()) method="post" data-turbo="true" {
@@ -938,10 +952,18 @@ enum UsageDirection {
 impl UsageDirection {
     fn move_by_month(self, instant: DateTime<Utc>) -> DateTime<Utc> {
         let month = chrono::Months::new(1);
+        self.move_by(instant, month)
+    }
 
+    fn move_by_year(self, instant: DateTime<Utc>) -> DateTime<Utc> {
+        let year = chrono::Months::new(12);
+        self.move_by(instant, year)
+    }
+
+    fn move_by(self, instant: DateTime<Utc>, delta: chrono::Months) -> DateTime<Utc> {
         match self {
-            UsageDirection::Prev => instant - month,
-            UsageDirection::Next => instant + month,
+            UsageDirection::Prev => instant - delta,
+            UsageDirection::Next => instant + delta,
         }
     }
 }
@@ -981,6 +1003,55 @@ async fn charge_point_usage_daily(
     }
 
     let preferences = Daily { db };
+
+    charge_point_usage(
+        cookies,
+        name,
+        turbo_frame_id,
+        backchannels,
+        form,
+        preferences,
+    )
+    .await
+}
+
+async fn charge_point_usage_monthly(
+    cookies: CookieJar,
+    Path(name): Path<String>,
+    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    State(db): State<Db>,
+    State(backchannels): State<Backchannels>,
+    Form(form): Form<UsageForm>,
+) -> Result<impl IntoResponse> {
+    struct Monthly {
+        db: Db,
+    }
+
+    impl UsagePreferences for Monthly {
+        const INSTANT_FORMAT: &str = "%Y";
+        const FLAVOR: &str = "monthly-for-year";
+
+        async fn get_usage(
+            &self,
+            name: &str,
+            instant: DateTime<Utc>,
+            timezone: chrono_tz::Tz,
+        ) -> Result<crate::db::DivisionUsageForPeriod, DbError> {
+            self.db
+                .monthly_usage_for_year(name, instant, timezone)
+                .await
+        }
+
+        fn move_instant(&self, instant: DateTime<Utc>, direction: UsageDirection) -> DateTime<Utc> {
+            direction.move_by_year(instant)
+        }
+
+        fn path(&self, base_path: &ChargePointPath<'_>, form: &UsageForm) -> String {
+            base_path.usage_monthly(Some(form))
+        }
+    }
+
+    let preferences = Monthly { db };
 
     charge_point_usage(
         cookies,

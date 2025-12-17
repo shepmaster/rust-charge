@@ -17,6 +17,8 @@ import {
   makeLoader,
   dateOnlyCategoryScale,
   dateOnlyCategoryTooltip,
+  monthOnlyCategoryScale,
+  monthOnlyCategoryTooltip,
   wattHourTooltip,
   wattHoursScale,
 } from "../chartParts";
@@ -45,12 +47,16 @@ const DataSchema = z.object({
     .array(),
 });
 
-const flavorSchema = z.enum(["daily-for-month"]);
+const flavorSchema = z.enum(["daily-for-month", "monthly-for-year"]);
 
 const CALLBACKS = {
   "daily-for-month": {
     tooltip: dateOnlyCategoryTooltip,
     scale: dateOnlyCategoryScale,
+  },
+  "monthly-for-year": {
+    tooltip: monthOnlyCategoryTooltip,
+    scale: monthOnlyCategoryScale,
   },
 };
 

@@ -50,6 +50,13 @@ enum DbCommand {
         tx: oneshot::Sender<QueryResult<DivisionUsageForPeriod>>,
     },
 
+    MonthlyUsageForYear {
+        name: String,
+        instant: DateTime<Utc>,
+        timezone: chrono_tz::Tz,
+        tx: oneshot::Sender<QueryResult<DivisionUsageForPeriod>>,
+    },
+
     CurrentTransaction {
         name: String,
         tx: oneshot::Sender<QueryResult<Option<TransactionId>>>,
@@ -282,6 +289,23 @@ impl Db {
     ) -> DbResult<DivisionUsageForPeriod> {
         let name = name.into();
         self.send(|tx| DbCommand::DailyUsageForMonth {
+            name,
+            instant,
+            timezone,
+            tx,
+        })
+        .await?
+        .context(DailyUsageForMonthSnafu)
+    }
+
+    pub(crate) async fn monthly_usage_for_year(
+        &self,
+        name: impl Into<String>,
+        instant: DateTime<Utc>,
+        timezone: chrono_tz::Tz,
+    ) -> DbResult<DivisionUsageForPeriod> {
+        let name = name.into();
+        self.send(|tx| DbCommand::MonthlyUsageForYear {
             name,
             instant,
             timezone,
@@ -556,6 +580,19 @@ impl Task {
                         .build_transaction()
                         .read_only()
                         .run(|db| queries::daily_usage_for_month(db, &name, instant, timezone));
+                    tx.send(energy).ok(/* Don't care if receiver is gone */);
+                }
+
+                DbCommand::MonthlyUsageForYear {
+                    name,
+                    instant,
+                    timezone,
+                    tx,
+                } => {
+                    let energy = db
+                        .build_transaction()
+                        .read_only()
+                        .run(|db| queries::monthly_usage_for_year(db, &name, instant, timezone));
                     tx.send(energy).ok(/* Don't care if receiver is gone */);
                 }
 

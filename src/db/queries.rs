@@ -833,6 +833,24 @@ pub fn daily_usage_for_month(
     division_usage_for_period(db, name, instant, timezone, "day", "month", "Daily usage")
 }
 
+#[instrument(skip_all)]
+pub fn monthly_usage_for_year(
+    db: &mut PgConnection,
+    name: &str,
+    instant: DateTime<Utc>,
+    timezone: chrono_tz::Tz,
+) -> QueryResult<DivisionUsageForPeriod> {
+    division_usage_for_period(
+        db,
+        name,
+        instant,
+        timezone,
+        "month",
+        "year",
+        "Monthly usage",
+    )
+}
+
 define_sql_function! {
     fn set_config(setting_name: sql_types::Text, new_value: sql_types::Text, is_local: sql_types::Bool) -> sql_types::Text;
 }
