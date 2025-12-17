@@ -1174,12 +1174,24 @@ where
     } else {
         const NAV_BUTTON_CLASS: &str = "cursor-pointer p-2 bg-neutral-300";
 
+        let params = Some(&UsageForm {
+            instant: Some(instant),
+            direction: None,
+        });
+
         Ok(page(html! {
             (top_nav());
 
             div."p-1" {
                 section {
                     (charge_point_header(&name, connected));
+
+                    h2 { "Usage" };
+
+                    ul."flex" {
+                        li."pr-1" { a href=(path.usage_daily(params)) { "Daily" } };
+                        li."pr-1" { a href=(path.usage_monthly(params)) { "Monthly" } };
+                    }
 
                     div."flex" data-controller="infinite-carousel" {
                         button."hidden".(NAV_BUTTON_CLASS) data-infinite-carousel-target="prev" { "←" };
