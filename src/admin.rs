@@ -144,7 +144,7 @@ struct Duration(chrono::Duration);
 impl maud::Render for Duration {
     fn render(&self) -> Markup {
         html! {
-            span data-controller="duration" {
+            rc-duration {
                 (self.0.num_seconds())
             }
         }

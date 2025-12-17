@@ -1,10 +1,9 @@
-import { Controller } from "@hotwired/stimulus";
 import { formatDuration } from "date-fns";
 
 import { formatDurationAsHMS, secondsToDuration } from "../formatters";
 
-export default class DurationController extends Controller<HTMLSpanElement> {
-  connect() {
+export default class Duration extends HTMLElement {
+  connectedCallback() {
     const seconds = this.originalSeconds();
 
     if (!seconds) {
@@ -13,9 +12,9 @@ export default class DurationController extends Controller<HTMLSpanElement> {
 
     const duration = secondsToDuration(seconds);
 
-    this.element.textContent = formatDurationAsHMS(duration);
-    this.element.title = formatDuration(duration);
-    this.element.dataset["original"] = `${seconds}`;
+    this.textContent = formatDurationAsHMS(duration);
+    this.title = formatDuration(duration);
+    this.dataset["original"] = `${seconds}`;
   }
 
   originalSeconds() {
@@ -26,6 +25,6 @@ export default class DurationController extends Controller<HTMLSpanElement> {
   }
 
   originalSecondsText() {
-    return this.element.dataset["original"] || this.element.textContent;
+    return this.dataset["original"] || this.textContent;
   }
 }
