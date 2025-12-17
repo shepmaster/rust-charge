@@ -2,7 +2,7 @@ import { Application } from "@hotwired/stimulus";
 import * as Turbo from "@hotwired/turbo";
 
 import DetectTimezone from "./elements/DetectTimezone";
-import DivisionUsageForPeriodChartController from "./controllers/division_usage_for_period_chart_controller";
+import DivisionUsageForPeriodChart from "./elements/DivisionUsageForPeriodChart";
 import Duration from "./elements/Duration";
 import FlashNotification from "./elements/FlashNotification";
 import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
@@ -46,14 +46,14 @@ Turbo.StreamActions["update-inline"] = function () {
 };
 
 window.Stimulus = Application.start();
-window.Stimulus.register(
-  "division-usage-for-period-chart",
-  DivisionUsageForPeriodChartController,
-);
 window.Stimulus.register("infinite-carousel", InfiniteCarouselController);
 window.Stimulus.register("relative-usage-chart", RelativeUsageChartController);
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
+window.customElements.define(
+  "rc-division-usage-for-period-chart",
+  DivisionUsageForPeriodChart,
+);
 window.customElements.define("rc-duration", Duration);
 window.customElements.define("rc-flash-notification", FlashNotification);
 window.customElements.define("rc-relative-timestamp", RelativeTimestamp);

@@ -162,7 +162,7 @@ export const makeLoader =
   >(
     props: MakeLoaderProps<S>,
   ) =>
-  (element: HTMLCanvasElement): z.infer<S> => {
+  (element: HTMLElement): z.infer<S> => {
     const { dataAttrName, schema } = props;
     const rawStringData = element.dataset[dataAttrName];
 

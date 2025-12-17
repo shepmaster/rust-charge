@@ -1118,8 +1118,7 @@ where
                 data-infinite-carousel-target="slide"
             {
                 div."relative".(CHART_CLASS) {
-                    canvas
-                        data-controller="division-usage-for-period-chart"
+                    rc-division-usage-for-period-chart
                         data-division-usage-for-period-chart-flavor-value=(P::FLAVOR)
                         data-division-usage-for-period-chart-value=(usage_data)
                     {};

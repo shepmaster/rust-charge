@@ -1,4 +1,3 @@
-import { Controller } from "@hotwired/stimulus";
 import {
   CategoryScale,
   Chart,
@@ -60,26 +59,24 @@ const CALLBACKS = {
   },
 };
 
-export default class DivisionUsageForPeriodChartController extends Controller<HTMLCanvasElement> {
-  static values = {
-    flavor: String,
-  };
+export default class DivisionUsageForPeriodChart extends HTMLElement {
+  connectedCallback() {
+    const canvas = document.createElement("canvas");
+    this.appendChild(canvas);
 
-  declare flavorValue: string;
-
-  async connect() {
     const loader = makeLoader({
       schema: DataSchema,
       dataAttrName: "divisionUsageForPeriodChartValue",
     });
 
-    const data = loader(this.element);
+    const data = loader(this);
 
-    const flavor = flavorSchema.parse(this.flavorValue);
+    const flavorText = this.dataset["divisionUsageForPeriodChartFlavorValue"];
+    const flavor = flavorSchema.parse(flavorText);
 
     const { tooltip, scale } = CALLBACKS[flavor];
 
-    const chart = new Chart(this.element, {
+    const chart = new Chart(canvas, {
       type: "bar",
       data,
       options: {
@@ -104,7 +101,7 @@ export default class DivisionUsageForPeriodChartController extends Controller<HT
       },
     });
 
-    this.element.addEventListener(
+    this.addEventListener(
       "rust-charge:update-inline",
       absorbNewData({ loader, chart }),
     );
