@@ -249,7 +249,7 @@ fn flashes<T>(flashes: &[Flash<T>], mut body: impl FnMut(&Flash<T>) -> Markup) -
 
 fn flash_one<T>(flash: &Flash<T>, mut body: impl FnMut(&Flash<T>) -> Markup) -> Markup {
     html! {
-        div data-controller="flash-notification" {
+        rc-flash-notification {
             div."flex"."p-2"."border".(flash.classes()) {
                 span."grow" { (body(flash)) };
                 button."hidden"."pl-2"
