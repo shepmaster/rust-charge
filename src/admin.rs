@@ -954,25 +954,91 @@ async fn charge_point_usage_daily(
     State(backchannels): State<Backchannels>,
     Form(form): Form<UsageForm>,
 ) -> Result<impl IntoResponse> {
+    struct Daily {
+        db: Db,
+    }
+
+    impl UsagePreferences for Daily {
+        const INSTANT_FORMAT: &str = "%B %Y";
+        const FLAVOR: &str = "daily-for-month";
+
+        async fn get_usage(
+            &self,
+            name: &str,
+            instant: DateTime<Utc>,
+            timezone: chrono_tz::Tz,
+        ) -> Result<crate::db::DivisionUsageForPeriod, DbError> {
+            self.db.daily_usage_for_month(name, instant, timezone).await
+        }
+
+        fn move_instant(&self, instant: DateTime<Utc>, direction: UsageDirection) -> DateTime<Utc> {
+            direction.move_by_month(instant)
+        }
+
+        fn path(&self, base_path: &ChargePointPath<'_>, form: &UsageForm) -> String {
+            base_path.usage_daily(Some(form))
+        }
+    }
+
+    let preferences = Daily { db };
+
+    charge_point_usage(
+        cookies,
+        name,
+        turbo_frame_id,
+        backchannels,
+        form,
+        preferences,
+    )
+    .await
+}
+
+trait UsagePreferences {
+    const INSTANT_FORMAT: &str;
+    const FLAVOR: &str;
+
+    async fn get_usage(
+        &self,
+        name: &str,
+        instant: DateTime<Utc>,
+        timezone: chrono_tz::Tz,
+    ) -> Result<crate::db::DivisionUsageForPeriod, DbError>;
+
+    fn move_instant(&self, instant: DateTime<Utc>, direction: UsageDirection) -> DateTime<Utc>;
+
+    fn path(&self, base_path: &ChargePointPath<'_>, form: &UsageForm) -> String;
+}
+
+async fn charge_point_usage<P>(
+    cookies: CookieJar,
+    name: String,
+    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    backchannels: Backchannels,
+    form: UsageForm,
+    preferences: P,
+) -> Result<impl IntoResponse>
+where
+    P: UsagePreferences,
+{
     let instant = form.instant.unwrap_or_else(Utc::now);
 
     let connected = backchannels.has(&name);
 
     let timezone = current_timezone(&cookies);
 
-    let daily_usage = db
-        .daily_usage_for_month(&name, instant, timezone)
+    let usage = preferences
+        .get_usage(&name, instant, timezone)
         .await
         .unwrap();
 
-    let total = daily_usage.total();
+    let total = usage.total();
 
     let path = PATH.charge_point(&name);
 
-    let daily_usage_data = serde_json::to_string(&daily_usage).unwrap();
+    let usage_data = serde_json::to_string(&usage).unwrap();
 
     let chart = || {
-        let month_year = instant.format("%B %Y");
+        let chart_title = instant.format(P::INSTANT_FORMAT);
 
         html! {
             section
@@ -983,12 +1049,12 @@ async fn charge_point_usage_daily(
                 div."relative".(CHART_CLASS) {
                     canvas
                         data-controller="division-usage-for-period-chart"
-                        data-division-usage-for-period-chart-flavor-value="daily-for-month"
-                        data-division-usage-for-period-chart-value=(daily_usage_data)
+                        data-division-usage-for-period-chart-flavor-value=(P::FLAVOR)
+                        data-division-usage-for-period-chart-value=(usage_data)
                     {};
                 };
                 h1."text-base" {
-                    (month_year);
+                    (chart_title);
                     " (Total ";
                     (total);
                     ")";
@@ -998,12 +1064,13 @@ async fn charge_point_usage_daily(
     };
 
     let make_placeholder = |instant: DateTime<Utc>, direction: UsageDirection| {
-        let instant = direction.move_by_month(instant);
+        let instant = preferences.move_instant(instant, direction);
 
-        let src = path.usage_daily(Some(&UsageForm {
+        let usage_form = UsageForm {
             instant: Some(instant),
             direction: Some(direction),
-        }));
+        };
+        let src = preferences.path(&path, &usage_form);
 
         move || {
             html! {

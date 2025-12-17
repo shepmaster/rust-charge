@@ -17,8 +17,8 @@ use crate::EventBus;
 mod queries;
 mod schema;
 
-pub(crate) use queries::{ChargePointOverview, ConsistencyError};
-use queries::{DivisionUsageForPeriod, QueryError, QueryResult};
+pub(crate) use queries::{ChargePointOverview, ConsistencyError, DivisionUsageForPeriod};
+use queries::{QueryError, QueryResult};
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
