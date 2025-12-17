@@ -1542,7 +1542,7 @@ async fn profile(cookies: CookieJar, session: Session) -> Markup {
                 h1 { "Configuration" };
 
                 form action=(PATH.profile()) method="post" {
-                    div."grid"."grid-cols-2"."gap-4" data-controller="detect-timezone" {
+                    rc-detect-timezone."grid"."grid-cols-2"."gap-4" {
                         div."flex"."gap-x-1" {
                             label."font-bold" for="timezone" { "Timezone" };
                             button."hidden".(SMALL_BUTTON_CLASS) data-detect-timezone-target="button" {
