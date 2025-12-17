@@ -45,22 +45,33 @@ const DataSchema = z.object({
     .array(),
 });
 
-export default class DailyUsageForMonthChartController extends Controller<HTMLCanvasElement> {
+const flavorSchema = z.enum(["daily-for-month"]);
+
+const CALLBACKS = {
+  "daily-for-month": {
+    tooltip: dateOnlyCategoryTooltip,
+    scale: dateOnlyCategoryScale,
+  },
+};
+
+export default class DivisionUsageForPeriodChartController extends Controller<HTMLCanvasElement> {
   static values = {
-    data: String,
-    href: String,
+    flavor: String,
   };
 
-  declare dataValue: string;
-  declare readonly hasDataValue: boolean;
+  declare flavorValue: string;
 
   async connect() {
     const loader = makeLoader({
       schema: DataSchema,
-      dataAttrName: "dailyUsageForMonthChartValue",
+      dataAttrName: "divisionUsageForPeriodChartValue",
     });
 
     const data = loader(this.element);
+
+    const flavor = flavorSchema.parse(this.flavorValue);
+
+    const { tooltip, scale } = CALLBACKS[flavor];
 
     const chart = new Chart(this.element, {
       type: "bar",
@@ -75,13 +86,13 @@ export default class DailyUsageForMonthChartController extends Controller<HTMLCa
           tooltip: {
             enabled: true,
             callbacks: {
-              title: dateOnlyCategoryTooltip,
+              title: tooltip,
               label: wattHourTooltip,
             },
           },
         },
         scales: {
-          x: dateOnlyCategoryScale,
+          x: scale,
           y: wattHoursScale,
         },
       },

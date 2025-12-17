@@ -1,8 +1,8 @@
 import { Application } from "@hotwired/stimulus";
 import * as Turbo from "@hotwired/turbo";
 
-import DailyUsageForMonthChartController from "./controllers/daily_usage_for_month_chart_controller";
 import DetectTimezoneController from "./controllers/detect_timezone_controller";
+import DivisionUsageForPeriodChartController from "./controllers/division_usage_for_period_chart_controller";
 import DurationController from "./controllers/duration_controller";
 import FlashNotificationController from "./controllers/flash_notification_controller";
 import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
@@ -46,11 +46,11 @@ Turbo.StreamActions["update-inline"] = function () {
 };
 
 window.Stimulus = Application.start();
-window.Stimulus.register(
-  "daily-usage-for-month-chart",
-  DailyUsageForMonthChartController,
-);
 window.Stimulus.register("detect-timezone", DetectTimezoneController);
+window.Stimulus.register(
+  "division-usage-for-period-chart",
+  DivisionUsageForPeriodChartController,
+);
 window.Stimulus.register("duration", DurationController);
 window.Stimulus.register("flash-notification", FlashNotificationController);
 window.Stimulus.register("infinite-carousel", InfiniteCarouselController);

@@ -982,8 +982,9 @@ async fn charge_point_usage_daily(
             {
                 div."relative".(CHART_CLASS) {
                     canvas
-                        data-controller="daily-usage-for-month-chart"
-                        data-daily-usage-for-month-chart-value=(daily_usage_data)
+                        data-controller="division-usage-for-period-chart"
+                        data-division-usage-for-period-chart-flavor-value="daily-for-month"
+                        data-division-usage-for-period-chart-value=(daily_usage_data)
                     {};
                 };
                 h1."text-base" {
