@@ -188,15 +188,9 @@ fn top_nav() -> Markup {
     }
 }
 
-// This is a lazy implementation as we don't check the quality
-// value for the type in question.
-struct AcceptsTurboStream(bool);
+struct HxBoost(bool);
 
-impl AcceptsTurboStream {
-    const MIME_TYPE: &'static [u8] = b"text/vnd.turbo-stream.html";
-}
-
-impl<S> FromRequestParts<S> for AcceptsTurboStream
+impl<S> FromRequestParts<S> for HxBoost
 where
     S: Send + Sync,
 {
@@ -206,12 +200,8 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let found = parts
-            .headers
-            .get_all("accept")
-            .iter()
-            .any(|v| memchr::memmem::find(v.as_bytes(), Self::MIME_TYPE).is_some());
-        Ok(Self(found))
+        let boosted = parts.headers.contains_key("HX-Boosted");
+        Ok(Self(boosted))
     }
 }
 
@@ -264,7 +254,7 @@ fn flash_string_body(f: &Flash<impl AsRef<str>>) -> Markup {
 }
 
 enum FlashResponder {
-    TurboStream,
+    HxBoosted,
     Redirect(Session),
 }
 
@@ -278,12 +268,12 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let accepts_turbo_stream = AcceptsTurboStream::from_request_parts(parts, state)
+        let boosted = HxBoost::from_request_parts(parts, state)
             .await
             .map_err(|e| match e {})?;
 
-        if accepts_turbo_stream.0 {
-            Ok(FlashResponder::TurboStream)
+        if boosted.0 {
+            Ok(FlashResponder::HxBoosted)
         } else {
             Session::from_request_parts(parts, state)
                 .await
@@ -303,7 +293,7 @@ impl FlashResponder {
         F: AsRef<Flash<T>> + Serialize,
     {
         match self {
-            FlashResponder::TurboStream => my_response::TurboStream::default()
+            FlashResponder::HxBoosted => my_response::HxResponse::default()
                 .append(FLASHES_ID, flash_one(flash.as_ref(), flash_body))
                 .into_response(),
 
@@ -358,17 +348,17 @@ const BUTTON_CLASS: &str = "bg-sky-700 hover:bg-sky-600 text-slate-100 p-1 round
 const SMALL_BUTTON_CLASS: &str =
     "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-xs text-xs";
 
-fn turbo_button(action: &str, label: &str) -> Markup {
-    html! {
-        form action=(action) method="post" data-turbo="true" {
-            button.(BUTTON_CLASS) { (label) };
-        };
-    }
+fn boost_button(action: &str, label: &str) -> Markup {
+    boost_button_core(action, "post", label)
 }
 
-fn turbo_delete_button(action: &str, label: &str) -> Markup {
+fn boost_delete_button(action: &str, label: &str) -> Markup {
+    boost_button_core(action, "delete", label)
+}
+
+fn boost_button_core(action: &str, method: &str, label: &str) -> Markup {
     html! {
-        form action=(action) method="delete" data-turbo="true" {
+        form action=(action) method=(method) hx-boost="true" hx-swap="none" hx-push-url="false" {
             button.(BUTTON_CLASS) { (label) };
         };
     }
@@ -629,8 +619,8 @@ async fn charge_point(
                 section {
                     h2 { "Actions" };
 
-                    (turbo_button(&path.transaction(), "Start transaction"));
-                    (turbo_delete_button(&path.transaction(), "Stop transaction"));
+                    (boost_button(&path.transaction(), "Start transaction"));
+                    (boost_delete_button(&path.transaction(), "Stop transaction"));
 
                     form."flex"."space-x-1" action=(path.trigger()) method="post" data-turbo="true" {
                         select.(BUTTON_CLASS) name="kind" {
@@ -663,13 +653,13 @@ async fn charge_point(
                         fieldset."border"."p-1"."inline-flex"."space-x-1" {
                             legend."pl-2"."pr-2" { "Create fake data" };
 
-                            (turbo_button(&path.fake_complete(), "Complete transaction"));
+                            (boost_button(&path.fake_complete(), "Complete transaction"));
 
-                            (turbo_button(&path.fake_start(), "Start transaction"));
+                            (boost_button(&path.fake_start(), "Start transaction"));
 
-                            (turbo_button(&path.fake_add_sample(), "Add sample to transaction"));
+                            (boost_button(&path.fake_add_sample(), "Add sample to transaction"));
 
-                            (turbo_button(&path.fake_end(), "End transaction"));
+                            (boost_button(&path.fake_end(), "End transaction"));
                         }
                     }
                 }
@@ -1732,6 +1722,10 @@ mod my_response {
             self.action("afterend", target, content)
         }
 
+        pub fn append(self, target: impl fmt::Display, content: Markup) -> Self {
+            self.action("beforeend", target, content)
+        }
+
         fn action(mut self, swap_kind: &str, target: impl fmt::Display, content: Markup) -> Self {
             let v = html! {
                 div id=(target) hx-swap-oob=(swap_kind) hx-select-oob="*" {
@@ -1757,10 +1751,6 @@ mod my_response {
     impl TurboStream {
         pub fn into_string(self) -> String {
             self.0.into_string()
-        }
-
-        pub fn append(self, target: impl std::fmt::Display, content: Markup) -> Self {
-            self.action("append", target, content)
         }
 
         pub fn replace(self, target: impl std::fmt::Display, content: Markup) -> Self {
