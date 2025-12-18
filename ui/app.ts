@@ -5,7 +5,7 @@ import DetectTimezone from "./elements/DetectTimezone";
 import DivisionUsageForPeriodChart from "./elements/DivisionUsageForPeriodChart";
 import Duration from "./elements/Duration";
 import FlashNotification from "./elements/FlashNotification";
-import InfiniteCarouselController from "./controllers/infinite_carousel_controller";
+import InfiniteCarousel from "./elements/InfiniteCarousel";
 import RelativeTimestamp from "./elements/RelativeTimestamp";
 import RelativeUsageChart from "./elements/RelativeUsageChart";
 
@@ -46,7 +46,6 @@ Turbo.StreamActions["update-inline"] = function () {
 };
 
 window.Stimulus = Application.start();
-window.Stimulus.register("infinite-carousel", InfiniteCarouselController);
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
 window.customElements.define(
@@ -55,5 +54,6 @@ window.customElements.define(
 );
 window.customElements.define("rc-duration", Duration);
 window.customElements.define("rc-flash-notification", FlashNotification);
+window.customElements.define("rc-infinite-carousel", InfiniteCarousel);
 window.customElements.define("rc-relative-timestamp", RelativeTimestamp);
 window.customElements.define("rc-relative-usage-chart", RelativeUsageChart);

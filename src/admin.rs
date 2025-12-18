@@ -1191,7 +1191,7 @@ where
                         li."pr-1" { a href=(path.usage_monthly(params)) { "Monthly" } };
                     }
 
-                    div."flex" data-controller="infinite-carousel" {
+                    rc-infinite-carousel."flex" {
                         button."hidden".(NAV_BUTTON_CLASS) data-infinite-carousel-target="prev" { "←" };
 
                         div."grow"."flex"."flex-nowrap"."overflow-x-hidden"."snap-x" data-infinite-carousel-target="slides" {
