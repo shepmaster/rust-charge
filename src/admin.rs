@@ -622,7 +622,7 @@ async fn charge_point(
                     (boost_button(&path.transaction(), "Start transaction"));
                     (boost_delete_button(&path.transaction(), "Stop transaction"));
 
-                    form."flex"."space-x-1" action=(path.trigger()) method="post" data-turbo="true" {
+                    form."flex"."space-x-1" action=(path.trigger()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
                         select.(BUTTON_CLASS) name="kind" {
                             option value="boot" { "Boot" };
                             option value="diagnostics-status" { "Diagnostics Status" };
@@ -640,7 +640,7 @@ async fn charge_point(
                         li { a href=(&path.usage_monthly(None)) { "Monthly Usage" } };
                     };
 
-                    form."flex"."space-x-1" action=(path.reset()) method="post" data-turbo="true" {
+                    form."flex"."space-x-1" action=(path.reset()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
                         select.(BUTTON_CLASS) name="kind" {
                             option value="soft" { "Soft" };
                             option value="hard" { "Hard" };
@@ -834,7 +834,7 @@ async fn charge_point_configuration(
                     @if kv.readonly {
                         (value);
                     } @else {
-                        form action=(path.configuration()) method="post" data-turbo="true" {
+                        form action=(path.configuration()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
                             input name="key" type="hidden" value=(kv.key);
                             input name="value" type="text" value=(value);
                             button { "Update" };
