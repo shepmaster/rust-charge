@@ -36,7 +36,6 @@
   },
   "//": "zod is held back due to https://github.com/parcel-bundler/parcel/issues/10175",
   "dependencies": {
-    "@hotwired/turbo": "^7.3.0",
     "chart.js": "^4.3.0",
     "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^4.1.0",

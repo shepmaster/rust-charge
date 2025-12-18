@@ -1,4 +1,3 @@
-import * as Turbo from "@hotwired/turbo";
 import htmx from "htmx.org";
 import "htmx-ext-sse";
 
@@ -9,38 +8,6 @@ import FlashNotification from "./elements/FlashNotification";
 import InfiniteCarousel from "./elements/InfiniteCarousel";
 import RelativeTimestamp from "./elements/RelativeTimestamp";
 import RelativeUsageChart from "./elements/RelativeUsageChart";
-
-interface TurboEventMap {
-  "turbo:before-stream-render": Turbo.TurboBeforeStreamRenderEvent;
-}
-
-declare global {
-  // https://github.com/hotwired/turbo/pull/800
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  interface ElementEventMap extends TurboEventMap {}
-}
-
-Turbo.session.drive = false;
-
-Turbo.StreamActions["update-inline"] = function () {
-  const template = this.firstChild;
-  if (!(template instanceof HTMLTemplateElement)) {
-    return;
-  }
-
-  const newElement = template.content.firstChild;
-  if (!newElement) {
-    return;
-  }
-
-  const event = new CustomEvent("rust-charge:update-inline", {
-    detail: { newElement },
-  });
-
-  for (const target of this.targetElements) {
-    target.dispatchEvent(event);
-  }
-};
 
 const SWAP_REPLACE = "rc-replace";
 const SWAP_UPDATE_INLINE = "rc-update-inline";
