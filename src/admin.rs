@@ -169,7 +169,7 @@ fn page(body: Markup) -> Markup {
 
     html! {
         (maud::DOCTYPE);
-        html {
+        html hx-ext="rust-charge" {
             head {
                 (ui_script_tag)
             }
@@ -521,7 +521,7 @@ async fn index(State(db): State<Db>) -> Result<Markup> {
             };
         };
 
-        turbo-stream-source src=(PATH.events());
+        div hx-ext="sse" sse-connect=(PATH.events()) sse-swap="message";
     }))
 }
 
@@ -539,7 +539,7 @@ async fn index_events(
                     let charge_points = db.list().await.unwrap();
                     let table = index_table(&charge_points);
 
-                    my_response::TurboStream::default().replace(INDEX_TABLE_ID, table)
+                    my_response::HxResponse::default().replace(INDEX_TABLE_ID, table)
                 }
 
                 _ => return None,
@@ -666,7 +666,7 @@ async fn charge_point(
             };
         };
 
-        turbo-stream-source src=(path.events());
+        div hx-ext="sse" sse-connect=(path.events()) sse-swap="message";
     }))
 }
 
@@ -687,7 +687,7 @@ async fn charge_point_events(
                 ChargePointConnectionChanged { name, connected } if name == cp_name => {
                     let gem = charge_point_connected_gem(connected);
 
-                    my_response::TurboStream::default().replace(CHARGE_POINT_GEM_ID, gem)
+                    my_response::HxResponse::default().replace(CHARGE_POINT_GEM_ID, gem)
                 }
 
                 TransactionSampleAdded { name } if name == cp_name => {
@@ -696,7 +696,7 @@ async fn charge_point_events(
                     let chart = overview_chart(&overview);
                     let table = overview_summary_table(&overview);
 
-                    my_response::TurboStream::default()
+                    my_response::HxResponse::default()
                         .update_inline(CHARGE_POINT_CHART_ID, chart)
                         .replace(CHARGE_POINT_TABLE_ID, table)
                 }
@@ -726,11 +726,9 @@ fn overview_chart(overview: &ChargePointOverview) -> Markup {
     let comparison_data = serde_json::to_string(&overview.comparison).unwrap();
 
     html! {
-        div."relative".(CHART_CLASS) {
-            rc-relative-usage-chart #(CHARGE_POINT_CHART_ID)
-                data-relative-usage-chart-data-value=(comparison_data)
-            {};
-        }
+        rc-relative-usage-chart #(CHARGE_POINT_CHART_ID)."relative".(CHART_CLASS)
+            data-relative-usage-chart-data-value=(comparison_data)
+        {};
     }
 }
 
@@ -1090,12 +1088,10 @@ where
                 ."grid"."justify-items-center"
                 data-infinite-carousel-target="slide"
             {
-                div."relative".(CHART_CLASS) {
-                    rc-division-usage-for-period-chart
-                        data-division-usage-for-period-chart-flavor-value=(P::FLAVOR)
-                        data-division-usage-for-period-chart-value=(usage_data)
-                    {};
-                };
+                rc-division-usage-for-period-chart."relative".(CHART_CLASS)
+                    data-division-usage-for-period-chart-flavor-value=(P::FLAVOR)
+                    data-division-usage-for-period-chart-value=(usage_data)
+                {};
                 h1."text-base" {
                     (chart_title);
                     " (Total ";
@@ -1187,7 +1183,7 @@ where
                 };
             };
 
-            turbo-stream-source src=(path.usage_events());
+            div hx-ext="sse" sse-connect=(path.usage_events()) sse-swap="message";
         }).into_response())
     }
 }
@@ -1207,7 +1203,7 @@ async fn charge_point_usage_events(
                 ChargePointConnectionChanged { name, connected } if name == cp_name => {
                     let gem = charge_point_connected_gem(connected);
 
-                    my_response::TurboStream::default().replace(CHARGE_POINT_GEM_ID, gem)
+                    my_response::HxResponse::default().replace(CHARGE_POINT_GEM_ID, gem)
                 }
 
                 // TODO: Maybe watch the sample events and notify that
@@ -1573,15 +1569,15 @@ async fn shutdown(State(token): State<CancellationToken>) -> Markup {
     })
 }
 
-fn stream_event_bus<F, FFut>(
+fn stream_event_bus<F, Fut>(
     bus: EventBus,
     f: F,
 ) -> Sse<impl Stream<Item = Result<sse::Event, Infallible>>>
 where
-    F: FnMut(Event) -> FFut,
+    F: FnMut(Event) -> Fut,
     F: 'static + Send,
-    FFut: Future<Output = Option<my_response::TurboStream>>,
-    FFut: 'static + Send,
+    Fut: Future<Output = Option<my_response::HxResponse>>,
+    Fut: 'static + Send,
 {
     let stream = bus
         .listen()
@@ -1700,7 +1696,6 @@ mod my_headers {
 }
 
 mod my_response {
-    use axum::{http::header, response::IntoResponse};
     use maud::{html, Markup};
     use std::fmt;
 
@@ -1708,10 +1703,22 @@ mod my_response {
     pub struct HxResponse(Markup);
 
     impl HxResponse {
+        pub fn into_string(self) -> String {
+            self.0.into_string()
+        }
+
         pub fn in_place(mut self, content: Markup) -> Self {
             self.0 .0.push_str(&content.0);
 
             self
+        }
+
+        pub fn replace(self, target: impl fmt::Display, content: Markup) -> Self {
+            self.action("rc-replace", target, content)
+        }
+
+        pub fn update_inline(self, target: impl std::fmt::Display, content: Markup) -> Self {
+            self.action("rc-update-inline", target, content)
         }
 
         pub fn before(self, target: impl fmt::Display, content: Markup) -> Self {
@@ -1742,48 +1749,6 @@ mod my_response {
     impl axum::response::IntoResponse for HxResponse {
         fn into_response(self) -> axum::response::Response {
             self.0.into_response()
-        }
-    }
-
-    #[derive(Default)]
-    pub struct TurboStream(Markup);
-
-    impl TurboStream {
-        pub fn into_string(self) -> String {
-            self.0.into_string()
-        }
-
-        pub fn replace(self, target: impl std::fmt::Display, content: Markup) -> Self {
-            self.action("replace", target, content)
-        }
-
-        pub fn update_inline(self, target: impl std::fmt::Display, content: Markup) -> Self {
-            self.action("update-inline", target, content)
-        }
-
-        fn action(mut self, action: &str, target: impl std::fmt::Display, content: Markup) -> Self {
-            let v = html! {
-                turbo-stream action=(action) target=(target) {
-                    template { (content) };
-                };
-            };
-
-            self.0 .0.push_str(&v.0);
-
-            self
-        }
-    }
-
-    impl IntoResponse for TurboStream {
-        fn into_response(self) -> axum::response::Response {
-            (
-                [(
-                    header::CONTENT_TYPE,
-                    "text/vnd.turbo-stream.html; charset=utf-8",
-                )],
-                self.0.into_string(),
-            )
-                .into_response()
         }
     }
 }

@@ -1,5 +1,5 @@
 import * as Turbo from "@hotwired/turbo";
-import "htmx.org";
+import htmx from "htmx.org";
 import "htmx-ext-sse";
 
 import DetectTimezone from "./elements/DetectTimezone";
@@ -41,6 +41,54 @@ Turbo.StreamActions["update-inline"] = function () {
     target.dispatchEvent(event);
   }
 };
+
+const SWAP_REPLACE = "rc-replace";
+const SWAP_UPDATE_INLINE = "rc-update-inline";
+
+function handleSwapReplace(target: HTMLElement, newElement: Element) {
+  target.replaceWith(newElement);
+
+  return [target];
+}
+
+function handleSwapUpdateInline(target: HTMLElement, newElement: Element) {
+  const event = new CustomEvent("rust-charge:update-inline", {
+    detail: { newElement },
+  });
+
+  target.dispatchEvent(event);
+
+  return [target];
+}
+
+htmx.defineExtension("rust-charge", {
+  isInlineSwap(swapStyle) {
+    return swapStyle === SWAP_REPLACE || swapStyle === SWAP_UPDATE_INLINE;
+  },
+
+  handleSwap(swapStyle, target, fragment) {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+
+    if (!(fragment instanceof DocumentFragment)) {
+      return false;
+    }
+
+    const newElement = fragment.firstElementChild?.firstElementChild;
+    if (!newElement) {
+      return false;
+    }
+
+    if (swapStyle === SWAP_REPLACE) {
+      return handleSwapReplace(target, newElement);
+    } else if (swapStyle === SWAP_UPDATE_INLINE) {
+      return handleSwapUpdateInline(target, newElement);
+    } else {
+      return false;
+    }
+  },
+});
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
 window.customElements.define(

@@ -189,7 +189,7 @@ interface AbsorbNewDataProps<
   S extends z.ZodType<ChartData<TType, TData>>,
 > {
   chart: Chart<TType, TData>;
-  loader: (element: HTMLCanvasElement) => z.infer<S>;
+  loader: (element: HTMLElement) => z.infer<S>;
 }
 
 export const absorbNewData =
@@ -204,7 +204,7 @@ export const absorbNewData =
     const { chart, loader } = props;
 
     const { newElement } = e.detail;
-    if (!(newElement instanceof HTMLCanvasElement)) {
+    if (!(newElement instanceof HTMLElement)) {
       return;
     }
 
