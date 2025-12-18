@@ -1,4 +1,3 @@
-import { Application } from "@hotwired/stimulus";
 import * as Turbo from "@hotwired/turbo";
 
 import DetectTimezone from "./elements/DetectTimezone";
@@ -14,10 +13,6 @@ interface TurboEventMap {
 }
 
 declare global {
-  interface Window {
-    Stimulus: Application;
-  }
-
   // https://github.com/hotwired/turbo/pull/800
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ElementEventMap extends TurboEventMap {}
@@ -44,8 +39,6 @@ Turbo.StreamActions["update-inline"] = function () {
     target.dispatchEvent(event);
   }
 };
-
-window.Stimulus = Application.start();
 
 window.customElements.define("rc-detect-timezone", DetectTimezone);
 window.customElements.define(

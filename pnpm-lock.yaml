@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@hotwired/stimulus':
-        specifier: ^3.2.1
-        version: 3.2.2
       '@hotwired/turbo':
         specifier: ^7.3.0
         version: 7.3.0
@@ -23,9 +20,6 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
-      stimulus-use:
-        specifier: ^0.52.2
-        version: 0.52.3(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7)
       zod:
         specifier: '=3.23.8'
         version: 3.23.8
@@ -122,9 +116,6 @@ packages:
   '@eslint/plugin-kit@0.4.1':
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@hotwired/stimulus@3.2.2':
-    resolution: {integrity: sha512-eGeIqNOQpXoPAIP7tC1+1Yc1yl1xnwYqg+3mzqxyrbE5pg5YFBZcA6YoTiByJB6DKAEsiWtl6tjTJS4IYtbB7A==}
 
   '@hotwired/turbo@7.3.0':
     resolution: {integrity: sha512-Dcu+NaSvHLT7EjrDrkEmH4qET2ZJZ5IcCWmNXxNQTBwlnE5tBZfN6WxZ842n5cHV52DH/AKNirbPBtcEXDLW4g==}
@@ -1101,9 +1092,6 @@ packages:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
 
-  hotkeys-js@3.13.7:
-    resolution: {integrity: sha512-ygFIdTqqwG4fFP7kkiYlvayZppeIQX2aPpirsngkv1xM1lP0piDY5QEh68nQnIKvz64hfocxhBaD/uK3sSK1yQ==}
-
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
@@ -1400,12 +1388,6 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
-  stimulus-use@0.52.3:
-    resolution: {integrity: sha512-stZ5dID6FUrGCR/ChWUa0FT5Z8iqkzT6lputOAb50eF+Ayg7RzJj4U/HoRlp2NV333QfvoRidru9HLbom4hZVw==}
-    peerDependencies:
-      '@hotwired/stimulus': '>= 3'
-      hotkeys-js: '>= 3'
-
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
     engines: {node: '>=8'}
@@ -1543,8 +1525,6 @@ snapshots:
     dependencies:
       '@eslint/core': 0.17.0
       levn: 0.4.1
-
-  '@hotwired/stimulus@3.2.2': {}
 
   '@hotwired/turbo@7.3.0': {}
 
@@ -2761,8 +2741,6 @@ snapshots:
 
   has-flag@4.0.0: {}
 
-  hotkeys-js@3.13.7: {}
-
   ignore@5.3.2: {}
 
   ignore@7.0.5: {}
@@ -3022,11 +3000,6 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   source-map-js@1.2.1: {}
-
-  stimulus-use@0.52.3(@hotwired/stimulus@3.2.2)(hotkeys-js@3.13.7):
-    dependencies:
-      '@hotwired/stimulus': 3.2.2
-      hotkeys-js: 3.13.7
 
   strip-json-comments@3.1.1: {}
 
