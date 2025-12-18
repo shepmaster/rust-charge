@@ -102,7 +102,8 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             .route(
                 "/charge_points/{name}/fake/connection",
                 delete(fake_connection_delete),
-            );
+            )
+            .route("/charge_points/{name}/fake/seen", post(fake_seen));
     }
 
     let store = MemoryStore::default();
@@ -508,6 +509,10 @@ impl<'a> ChargePointPath<'a> {
     fn fake_connection(self) -> String {
         format!("{self}/fake/connection")
     }
+
+    fn fake_seen(self) -> String {
+        format!("{self}/fake/seen")
+    }
 }
 
 async fn index(State(db): State<Db>) -> Result<Markup> {
@@ -679,6 +684,7 @@ async fn charge_point(
 
                             (boost_button(&path.fake_connection(), "Connect"));
                             (boost_delete_button(&path.fake_connection(), "Disconnect"));
+                            (boost_button(&path.fake_seen(), "Seen"));
                         }
                     }
                 }
@@ -1525,6 +1531,24 @@ async fn fake_connection_delete(
     .await;
 
     bus.charge_point_connection_changed(name, false);
+
+    Ok(flash)
+}
+
+#[cfg(feature = "fake-data")]
+async fn fake_seen(
+    Path(name): Path<String>,
+    flash_responder: FlashResponder,
+    State(bus): State<EventBus>,
+) -> Result<impl IntoResponse> {
+    let flash = charge_point_flash(
+        flash_responder,
+        &name,
+        Flash::Success("Charge point has been seen".into()),
+    )
+    .await;
+
+    bus.charge_point_seen(name);
 
     Ok(flash)
 }
