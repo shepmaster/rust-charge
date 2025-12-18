@@ -94,7 +94,15 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
                 "/charge_points/{name}/fake/add_sample",
                 post(fake_add_sample),
             )
-            .route("/charge_points/{name}/fake/end", post(fake_end_transaction));
+            .route("/charge_points/{name}/fake/end", post(fake_end_transaction))
+            .route(
+                "/charge_points/{name}/fake/connection",
+                post(fake_connection_create),
+            )
+            .route(
+                "/charge_points/{name}/fake/connection",
+                delete(fake_connection_delete),
+            );
     }
 
     let store = MemoryStore::default();
@@ -496,6 +504,10 @@ impl<'a> ChargePointPath<'a> {
     fn fake_end(self) -> String {
         format!("{self}/fake/end")
     }
+
+    fn fake_connection(self) -> String {
+        format!("{self}/fake/connection")
+    }
 }
 
 async fn index(State(db): State<Db>) -> Result<Markup> {
@@ -660,6 +672,13 @@ async fn charge_point(
                             (boost_button(&path.fake_add_sample(), "Add sample to transaction"));
 
                             (boost_button(&path.fake_end(), "End transaction"));
+                        }
+
+                        fieldset."border"."p-1"."inline-flex"."space-x-1" {
+                            legend."pl-2"."pr-2" { "Fake actions" };
+
+                            (boost_button(&path.fake_connection(), "Connect"));
+                            (boost_delete_button(&path.fake_connection(), "Disconnect"));
                         }
                     }
                 }
@@ -1472,6 +1491,42 @@ async fn fake_end_transaction(
         Flash::Success("Transaction ended".into()),
     )
     .await)
+}
+
+#[cfg(feature = "fake-data")]
+async fn fake_connection_create(
+    Path(name): Path<String>,
+    flash_responder: FlashResponder,
+    State(bus): State<EventBus>,
+) -> Result<impl IntoResponse> {
+    let flash = charge_point_flash(
+        flash_responder,
+        &name,
+        Flash::Success("Charge point is connected".into()),
+    )
+    .await;
+
+    bus.charge_point_connection_changed(name, true);
+
+    Ok(flash)
+}
+
+#[cfg(feature = "fake-data")]
+async fn fake_connection_delete(
+    Path(name): Path<String>,
+    flash_responder: FlashResponder,
+    State(bus): State<EventBus>,
+) -> Result<impl IntoResponse> {
+    let flash = charge_point_flash(
+        flash_responder,
+        &name,
+        Flash::Success("Charge point is disconnected".into()),
+    )
+    .await;
+
+    bus.charge_point_connection_changed(name, false);
+
+    Ok(flash)
 }
 
 async fn charge_point_flash(
