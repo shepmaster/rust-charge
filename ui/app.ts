@@ -1,4 +1,6 @@
 import * as Turbo from "@hotwired/turbo";
+import "htmx.org";
+import "htmx-ext-sse";
 
 import DetectTimezone from "./elements/DetectTimezone";
 import DivisionUsageForPeriodChart from "./elements/DivisionUsageForPeriodChart";

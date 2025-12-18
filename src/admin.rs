@@ -26,7 +26,7 @@ use tower_http::{
 use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 use tracing::{info_span, warn};
 
-use self::my_headers::TurboFrame;
+use self::my_headers::HxTarget;
 use crate::{
     db::{ChargePoint, ChargePointOverview, Db, DbError},
     ocpp, Backchannels, Event, EventBus,
@@ -970,7 +970,7 @@ impl UsageDirection {
 async fn charge_point_usage_daily(
     cookies: CookieJar,
     Path(name): Path<String>,
-    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    hx_target: Option<TypedHeader<HxTarget>>,
     State(db): State<Db>,
     State(backchannels): State<Backchannels>,
     Form(form): Form<UsageForm>,
@@ -1003,21 +1003,13 @@ async fn charge_point_usage_daily(
 
     let preferences = Daily { db };
 
-    charge_point_usage(
-        cookies,
-        name,
-        turbo_frame_id,
-        backchannels,
-        form,
-        preferences,
-    )
-    .await
+    charge_point_usage(cookies, name, hx_target, backchannels, form, preferences).await
 }
 
 async fn charge_point_usage_monthly(
     cookies: CookieJar,
     Path(name): Path<String>,
-    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    hx_target: Option<TypedHeader<HxTarget>>,
     State(db): State<Db>,
     State(backchannels): State<Backchannels>,
     Form(form): Form<UsageForm>,
@@ -1052,15 +1044,7 @@ async fn charge_point_usage_monthly(
 
     let preferences = Monthly { db };
 
-    charge_point_usage(
-        cookies,
-        name,
-        turbo_frame_id,
-        backchannels,
-        form,
-        preferences,
-    )
-    .await
+    charge_point_usage(cookies, name, hx_target, backchannels, form, preferences).await
 }
 
 trait UsagePreferences {
@@ -1082,7 +1066,7 @@ trait UsagePreferences {
 async fn charge_point_usage<P>(
     cookies: CookieJar,
     name: String,
-    turbo_frame_id: Option<TypedHeader<TurboFrame>>,
+    hx_target: Option<TypedHeader<HxTarget>>,
     backchannels: Backchannels,
     form: UsageForm,
     preferences: P,
@@ -1143,7 +1127,7 @@ where
 
         move || {
             html! {
-                turbo-frame #(instant)."hidden".(CHART_CLASS)."grid"."place-items-center" src=(src) loading="lazy" {
+                div #(instant)."hidden".(CHART_CLASS)."grid"."place-items-center" hx-get=(src) hx-swap="outerHTML" hx-trigger="intersect once" {
                     div."grid"."justify-items-center" {
                         span {
                             "Loading ";
@@ -1159,14 +1143,14 @@ where
     let [prev_placeholder, next_placeholder] =
         [UsageDirection::Prev, UsageDirection::Next].map(|d| make_placeholder(instant, d));
 
-    if turbo_frame_id.is_some() {
-        let stream = my_response::TurboStream::default();
+    if hx_target.is_some() {
+        let stream = my_response::HxResponse::default();
         let stream = match form.direction {
             Some(UsageDirection::Prev) => stream.before(instant, prev_placeholder()),
             Some(UsageDirection::Next) => stream.after(instant, next_placeholder()),
             None => stream,
         };
-        let stream = stream.replace(instant, chart());
+        let stream = stream.in_place(chart());
 
         Ok(stream.into_response())
     } else {
@@ -1697,13 +1681,13 @@ mod my_headers {
     use axum_extra::headers::{self, Header, HeaderName, HeaderValue};
 
     #[derive(Debug)]
-    pub struct TurboFrame(pub String);
+    pub struct HxTarget(pub String);
 
-    static TURBO_FRAME_NAME: HeaderName = HeaderName::from_static("turbo-frame");
+    static HX_TARGET_NAME: HeaderName = HeaderName::from_static("hx-target");
 
-    impl Header for TurboFrame {
+    impl Header for HxTarget {
         fn name() -> &'static HeaderName {
-            &TURBO_FRAME_NAME
+            &HX_TARGET_NAME
         }
 
         fn decode<'i, I>(values: &mut I) -> Result<Self, headers::Error>
@@ -1728,6 +1712,44 @@ mod my_headers {
 mod my_response {
     use axum::{http::header, response::IntoResponse};
     use maud::{html, Markup};
+    use std::fmt;
+
+    #[derive(Default)]
+    pub struct HxResponse(Markup);
+
+    impl HxResponse {
+        pub fn in_place(mut self, content: Markup) -> Self {
+            self.0 .0.push_str(&content.0);
+
+            self
+        }
+
+        pub fn before(self, target: impl fmt::Display, content: Markup) -> Self {
+            self.action("beforebegin", target, content)
+        }
+
+        pub fn after(self, target: impl fmt::Display, content: Markup) -> Self {
+            self.action("afterend", target, content)
+        }
+
+        fn action(mut self, swap_kind: &str, target: impl fmt::Display, content: Markup) -> Self {
+            let v = html! {
+                div id=(target) hx-swap-oob=(swap_kind) hx-select-oob="*" {
+                    (content);
+                }
+            };
+
+            self.0 .0.push_str(&v.0);
+
+            self
+        }
+    }
+
+    impl axum::response::IntoResponse for HxResponse {
+        fn into_response(self) -> axum::response::Response {
+            self.0.into_response()
+        }
+    }
 
     #[derive(Default)]
     pub struct TurboStream(Markup);
@@ -1735,14 +1757,6 @@ mod my_response {
     impl TurboStream {
         pub fn into_string(self) -> String {
             self.0.into_string()
-        }
-
-        pub fn before(self, target: impl std::fmt::Display, content: Markup) -> Self {
-            self.action("before", target, content)
-        }
-
-        pub fn after(self, target: impl std::fmt::Display, content: Markup) -> Self {
-            self.action("after", target, content)
         }
 
         pub fn append(self, target: impl std::fmt::Display, content: Markup) -> Self {
