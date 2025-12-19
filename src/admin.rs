@@ -471,32 +471,9 @@ impl<'a> ChargePointPath<'a> {
         format!("{self}/reset")
     }
 
-    fn fake_complete(self) -> String {
-        format!("{self}/fake/complete")
-    }
-
-    fn fake_start(self) -> String {
-        format!("{self}/fake/start")
-    }
-
-    fn fake_add_sample(self) -> String {
-        format!("{self}/fake/add_sample")
-    }
-
-    fn fake_end(self) -> String {
-        format!("{self}/fake/end")
-    }
-
-    fn fake_connection(self) -> String {
-        format!("{self}/fake/connection")
-    }
-
-    fn fake_connection_delete(self) -> String {
-        format!("{self}/fake/connection/_delete")
-    }
-
-    fn fake_seen(self) -> String {
-        format!("{self}/fake/seen")
+    #[cfg(feature = "fake-data")]
+    fn fake(self) -> fake::Paths<Self> {
+        fake::Paths(self)
     }
 }
 
@@ -597,6 +574,12 @@ async fn charge_point(
 
     let path = PATH.charge_point(&name);
 
+    #[cfg(feature = "fake-data")]
+    let fake_links = html! { a href=(path.fake()) { "Fake" } };
+
+    #[cfg(not(feature = "fake-data"))]
+    let fake_links = html! {};
+
     Ok(page(html! {
         (top_nav());
 
@@ -651,27 +634,7 @@ async fn charge_point(
                         button.(BUTTON_CLASS) type="submit" { "Reset" };
                     };
 
-                    @if cfg!(feature = "fake-data") {
-                        fieldset."border"."p-1"."inline-flex"."space-x-1" {
-                            legend."pl-2"."pr-2" { "Create fake data" };
-
-                            (hx_button(&path.fake_complete(), "Complete transaction"));
-
-                            (hx_button(&path.fake_start(), "Start transaction"));
-
-                            (hx_button(&path.fake_add_sample(), "Add sample to transaction"));
-
-                            (hx_button(&path.fake_end(), "End transaction"));
-                        }
-
-                        fieldset."border"."p-1"."inline-flex"."space-x-1" {
-                            legend."pl-2"."pr-2" { "Fake actions" };
-
-                            (hx_button(&path.fake_connection(), "Connect"));
-                            (hx_delete(&path.fake_connection_delete(), "Disconnect"));
-                            (hx_button(&path.fake_seen(), "Seen"));
-                        }
-                    }
+                    (fake_links);
                 }
             };
         };
