@@ -575,7 +575,7 @@ async fn charge_point(
     let path = PATH.charge_point(&name);
 
     #[cfg(feature = "fake-data")]
-    let fake_links = html! { a href=(path.fake()) { "Fake" } };
+    let fake_links = html! { a href=(path.fake()) { "Generate fake data" } };
 
     #[cfg(not(feature = "fake-data"))]
     let fake_links = html! {};
@@ -602,40 +602,49 @@ async fn charge_point(
                 };
 
                 section {
-                    h2 { "Actions" };
-
-                    (hx_button(&path.transaction(), "Start transaction"));
-                    (hx_delete(&path.transaction_delete(), "Stop transaction"));
-
-                    form."flex"."space-x-1" action=(path.trigger()) method="post" hx-post=(path.trigger()) hx-swap="none" {
-                        select.(BUTTON_CLASS) name="kind" {
-                            option value="boot" { "Boot" };
-                            option value="diagnostics-status" { "Diagnostics Status" };
-                            option value="firmware-status" { "Firmware Status"}
-                            option value="meter-values" { "Meter Values" };
-                            option value="status" selected { "Status" };
-                        };
-
-                        button.(BUTTON_CLASS) type="submit" { "Trigger" };
-                    };
+                    h2 { "Further information" };
 
                     ul {
-                        li { a href=(&path.configuration()) { "Configuration" } };
                         li { a href=(&path.usage_daily(None)) { "Daily Usage" } };
                         li { a href=(&path.usage_monthly(None)) { "Monthly Usage" } };
                     };
+                };
 
-                    form."flex"."space-x-1" action=(path.reset()) method="post" hx-post=(path.reset()) hx-swap="none" {
-                        select.(BUTTON_CLASS) name="kind" {
-                            option value="soft" { "Soft" };
-                            option value="hard" { "Hard" };
+                section {
+                    h2 { "Uncommon actions" };
+
+                    div."space-y-1" {
+                        a href=(&path.configuration()) { "View configuration" };
+
+                        div."flex"."space-x-1" {
+                            (hx_button(&path.transaction(), "Start transaction"));
+                            (hx_delete(&path.transaction_delete(), "Stop transaction"));
                         };
 
-                        button.(BUTTON_CLASS) type="submit" { "Reset" };
-                    };
+                        form."flex"."space-x-1" action=(path.trigger()) method="post" hx-post=(path.trigger()) hx-swap="none" {
+                            select.(BUTTON_CLASS) name="kind" {
+                                option value="boot" { "Boot" };
+                                option value="diagnostics-status" { "Diagnostics Status" };
+                                option value="firmware-status" { "Firmware Status"}
+                                option value="meter-values" { "Meter Values" };
+                                option value="status" selected { "Status" };
+                            };
 
-                    (fake_links);
-                }
+                            button.(BUTTON_CLASS) type="submit" { "Trigger" };
+                        };
+
+                        form."flex"."space-x-1" action=(path.reset()) method="post" hx-post=(path.reset()) hx-swap="none" {
+                            select.(BUTTON_CLASS) name="kind" {
+                                option value="soft" { "Soft" };
+                                option value="hard" { "Hard" };
+                            };
+
+                            button.(BUTTON_CLASS) type="submit" { "Reset" };
+                        };
+
+                        (fake_links);
+                    };
+                };
             };
         };
 
