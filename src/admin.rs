@@ -43,49 +43,34 @@ const DEFAULT_TIMEZONE: chrono_tz::Tz = chrono_tz::America::New_York;
 
 pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
     #[allow(unused_mut)]
-    let mut router = Router::new()
-        .route("/", get(index))
-        .route("/events", get(index_events))
-        .route("/charge_points/{name}", get(charge_point))
-        .route("/charge_points/{name}/events", get(charge_point_events))
+    let mut resource = Router::new()
+        .route("/", get(charge_point))
+        .route("/events", get(charge_point_events))
+        .route("/configuration", get(charge_point_configuration))
+        .route("/configuration", post(charge_point_configuration_update))
+        .route("/usage/daily", get(charge_point_usage_daily))
+        .route("/usage/monthly", get(charge_point_usage_monthly))
+        .route("/usage/events", get(charge_point_usage_events))
+        .route("/transaction", post(charge_point_transaction_create))
         .route(
-            "/charge_points/{name}/configuration",
-            get(charge_point_configuration),
-        )
-        .route(
-            "/charge_points/{name}/configuration",
-            post(charge_point_configuration_update),
-        )
-        .route(
-            "/charge_points/{name}/usage/daily",
-            get(charge_point_usage_daily),
-        )
-        .route(
-            "/charge_points/{name}/usage/monthly",
-            get(charge_point_usage_monthly),
-        )
-        .route(
-            "/charge_points/{name}/usage/events",
-            get(charge_point_usage_events),
-        )
-        .route(
-            "/charge_points/{name}/transaction",
-            post(charge_point_transaction_create),
-        )
-        .route(
-            "/charge_points/{name}/transaction/_delete",
+            "/transaction/_delete",
             post(charge_point_transaction_delete),
         )
-        .route("/charge_points/{name}/trigger", post(charge_point_trigger))
-        .route("/charge_points/{name}/reset", post(charge_point_reset))
-        .route("/profile", get(profile))
-        .route("/profile", post(profile_update))
-        .route("/shutdown", post(shutdown));
+        .route("/trigger", post(charge_point_trigger))
+        .route("/reset", post(charge_point_reset));
 
     #[cfg(feature = "fake-data")]
     {
-        router = router.nest("/charge_points/{name}/fake", fake::router());
+        resource = resource.nest("/fake", fake::router());
     }
+
+    let router = Router::new()
+        .route("/", get(index))
+        .route("/events", get(index_events))
+        .route("/profile", get(profile))
+        .route("/profile", post(profile_update))
+        .route("/shutdown", post(shutdown))
+        .nest("/charge_points/{name}", resource);
 
     let store = MemoryStore::default();
     let key = tower_sessions::cookie::Key::from(&config.session_secret);
