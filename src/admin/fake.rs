@@ -6,7 +6,7 @@ use axum::{
 };
 use snafu::prelude::*;
 
-use super::{charge_point_flash, Flash, FlashResponder};
+use super::{charge_point_flash, post_or_delete, Flash, FlashResponder};
 
 use crate::{AppState, Db, DbError, EventBus};
 
@@ -17,7 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/add_sample", post(add_sample))
         .route("/end", post(end_transaction))
         .route("/connection", post(connection_create))
-        .route("/connection/_delete", post(connection_delete))
+        .route("/connection/_delete", post_or_delete(connection_delete))
         .route("/seen", post(seen))
 }
 

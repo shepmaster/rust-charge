@@ -54,7 +54,7 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
         .route("/transaction", post(charge_point_transaction_create))
         .route(
             "/transaction/_delete",
-            post(charge_point_transaction_delete),
+            post_or_delete(charge_point_transaction_delete),
         )
         .route("/trigger", post(charge_point_trigger))
         .route("/reset", post(charge_point_reset));
@@ -90,6 +90,17 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
         .layer(session_layer);
 
     router.layer(middleware)
+}
+
+fn post_or_delete<H, T, S>(handler: H) -> axum::routing::MethodRouter<S>
+where
+    H: axum::handler::Handler<T, S>,
+    H: Copy,
+    T: 'static,
+    S: Send + Sync + 'static,
+    S: Clone,
+{
+    post(handler).delete(handler)
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -163,9 +174,9 @@ fn top_nav() -> Markup {
     }
 }
 
-struct HxBoost(bool);
+struct HxRequest(bool);
 
-impl<S> FromRequestParts<S> for HxBoost
+impl<S> FromRequestParts<S> for HxRequest
 where
     S: Send + Sync,
 {
@@ -175,8 +186,8 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let boosted = parts.headers.contains_key("HX-Boosted");
-        Ok(Self(boosted))
+        let hx_request = parts.headers.contains_key("hx-request");
+        Ok(Self(hx_request))
     }
 }
 
@@ -229,7 +240,7 @@ fn flash_string_body(f: &Flash<impl AsRef<str>>) -> Markup {
 }
 
 enum FlashResponder {
-    HxBoosted,
+    HxRequest,
     Redirect(Session),
 }
 
@@ -243,12 +254,12 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let boosted = HxBoost::from_request_parts(parts, state)
+        let hx_request = HxRequest::from_request_parts(parts, state)
             .await
             .map_err(|e| match e {})?;
 
-        if boosted.0 {
-            Ok(FlashResponder::HxBoosted)
+        if hx_request.0 {
+            Ok(FlashResponder::HxRequest)
         } else {
             Session::from_request_parts(parts, state)
                 .await
@@ -268,7 +279,7 @@ impl FlashResponder {
         F: AsRef<Flash<T>> + Serialize,
     {
         match self {
-            FlashResponder::HxBoosted => my_response::HxResponse::default()
+            FlashResponder::HxRequest => my_response::HxResponse::default()
                 .append(FLASHES_ID, flash_one(flash.as_ref(), flash_body))
                 .into_response(),
 
@@ -323,9 +334,17 @@ const BUTTON_CLASS: &str = "bg-sky-700 hover:bg-sky-600 text-slate-100 p-1 round
 const SMALL_BUTTON_CLASS: &str =
     "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-xs text-xs";
 
-fn boost_button(action: &str, label: &str) -> Markup {
+fn hx_button(action: &str, label: &str) -> Markup {
     html! {
-        form action=(action) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
+        form action=(action) method="post" hx-post=(action) hx-swap="none" {
+            button.(BUTTON_CLASS) { (label) };
+        };
+    }
+}
+
+fn hx_delete(action: &str, label: &str) -> Markup {
+    html! {
+        form action=(action) method="post" hx-delete=(action) hx-swap="none" {
             button.(BUTTON_CLASS) { (label) };
         };
     }
@@ -602,10 +621,10 @@ async fn charge_point(
                 section {
                     h2 { "Actions" };
 
-                    (boost_button(&path.transaction(), "Start transaction"));
-                    (boost_button(&path.transaction_delete(), "Stop transaction"));
+                    (hx_button(&path.transaction(), "Start transaction"));
+                    (hx_delete(&path.transaction_delete(), "Stop transaction"));
 
-                    form."flex"."space-x-1" action=(path.trigger()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
+                    form."flex"."space-x-1" action=(path.trigger()) method="post" hx-post=(path.trigger()) hx-swap="none" {
                         select.(BUTTON_CLASS) name="kind" {
                             option value="boot" { "Boot" };
                             option value="diagnostics-status" { "Diagnostics Status" };
@@ -623,7 +642,7 @@ async fn charge_point(
                         li { a href=(&path.usage_monthly(None)) { "Monthly Usage" } };
                     };
 
-                    form."flex"."space-x-1" action=(path.reset()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
+                    form."flex"."space-x-1" action=(path.reset()) method="post" hx-post=(path.reset()) hx-swap="none" {
                         select.(BUTTON_CLASS) name="kind" {
                             option value="soft" { "Soft" };
                             option value="hard" { "Hard" };
@@ -636,21 +655,21 @@ async fn charge_point(
                         fieldset."border"."p-1"."inline-flex"."space-x-1" {
                             legend."pl-2"."pr-2" { "Create fake data" };
 
-                            (boost_button(&path.fake_complete(), "Complete transaction"));
+                            (hx_button(&path.fake_complete(), "Complete transaction"));
 
-                            (boost_button(&path.fake_start(), "Start transaction"));
+                            (hx_button(&path.fake_start(), "Start transaction"));
 
-                            (boost_button(&path.fake_add_sample(), "Add sample to transaction"));
+                            (hx_button(&path.fake_add_sample(), "Add sample to transaction"));
 
-                            (boost_button(&path.fake_end(), "End transaction"));
+                            (hx_button(&path.fake_end(), "End transaction"));
                         }
 
                         fieldset."border"."p-1"."inline-flex"."space-x-1" {
                             legend."pl-2"."pr-2" { "Fake actions" };
 
-                            (boost_button(&path.fake_connection(), "Connect"));
-                            (boost_button(&path.fake_connection_delete(), "Disconnect"));
-                            (boost_button(&path.fake_seen(), "Seen"));
+                            (hx_button(&path.fake_connection(), "Connect"));
+                            (hx_delete(&path.fake_connection_delete(), "Disconnect"));
+                            (hx_button(&path.fake_seen(), "Seen"));
                         }
                     }
                 }
@@ -823,7 +842,7 @@ async fn charge_point_configuration(
                     @if kv.readonly {
                         (value);
                     } @else {
-                        form action=(path.configuration()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
+                        form action=(path.configuration()) method="post" hx-post=(path.configuration()) hx-swap="none" {
                             input name="key" type="hidden" value=(kv.key);
                             input name="value" type="text" value=(value);
                             button { "Update" };
