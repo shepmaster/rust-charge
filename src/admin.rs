@@ -691,10 +691,14 @@ async fn charge_point_events(
 }
 
 fn charge_point_header(name: &str, connected: bool) -> Markup {
+    let path = PATH.charge_point(name);
+
     html! {
         h1."flex"."items-center"."gap-x-1" {
-            "Charge Point ";
-            (name);
+            a."text-inherit"."no-underline" href=(path.index()) {
+                "Charge Point ";
+                (name);
+            };
             (charge_point_connected_gem(connected));
         };
     }
