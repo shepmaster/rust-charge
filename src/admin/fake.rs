@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
-    routing::{delete, post},
+    routing::post,
     Router,
 };
 use snafu::prelude::*;
@@ -17,7 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/add_sample", post(add_sample))
         .route("/end", post(end_transaction))
         .route("/connection", post(connection_create))
-        .route("/connection", delete(connection_delete))
+        .route("/connection/_delete", post(connection_delete))
         .route("/seen", post(seen))
 }
 

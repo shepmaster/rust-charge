@@ -1,7 +1,7 @@
 use axum::{
     extract::{FromRequestParts, Path, State},
     response::{sse, IntoResponse, Redirect, Sse},
-    routing::{delete, get, post},
+    routing::{get, post},
     Form, Router,
 };
 use axum_extra::{
@@ -73,8 +73,8 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
             post(charge_point_transaction_create),
         )
         .route(
-            "/charge_points/{name}/transaction",
-            delete(charge_point_transaction_delete),
+            "/charge_points/{name}/transaction/_delete",
+            post(charge_point_transaction_delete),
         )
         .route("/charge_points/{name}/trigger", post(charge_point_trigger))
         .route("/charge_points/{name}/reset", post(charge_point_reset))
@@ -339,16 +339,8 @@ const SMALL_BUTTON_CLASS: &str =
     "bg-sky-700 hover:bg-sky-600 text-slate-100 p-0.5 rounded-xs text-xs";
 
 fn boost_button(action: &str, label: &str) -> Markup {
-    boost_button_core(action, "post", label)
-}
-
-fn boost_delete_button(action: &str, label: &str) -> Markup {
-    boost_button_core(action, "delete", label)
-}
-
-fn boost_button_core(action: &str, method: &str, label: &str) -> Markup {
     html! {
-        form action=(action) method=(method) hx-boost="true" hx-swap="none" hx-push-url="false" {
+        form action=(action) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
             button.(BUTTON_CLASS) { (label) };
         };
     }
@@ -463,6 +455,10 @@ impl<'a> ChargePointPath<'a> {
         format!("{self}/transaction")
     }
 
+    fn transaction_delete(self) -> String {
+        format!("{self}/transaction/_delete")
+    }
+
     fn trigger(self) -> String {
         format!("{self}/trigger")
     }
@@ -489,6 +485,10 @@ impl<'a> ChargePointPath<'a> {
 
     fn fake_connection(self) -> String {
         format!("{self}/fake/connection")
+    }
+
+    fn fake_connection_delete(self) -> String {
+        format!("{self}/fake/connection/_delete")
     }
 
     fn fake_seen(self) -> String {
@@ -618,7 +618,7 @@ async fn charge_point(
                     h2 { "Actions" };
 
                     (boost_button(&path.transaction(), "Start transaction"));
-                    (boost_delete_button(&path.transaction(), "Stop transaction"));
+                    (boost_button(&path.transaction_delete(), "Stop transaction"));
 
                     form."flex"."space-x-1" action=(path.trigger()) method="post" hx-boost="true" hx-swap="none" hx-push-url="false" {
                         select.(BUTTON_CLASS) name="kind" {
@@ -664,7 +664,7 @@ async fn charge_point(
                             legend."pl-2"."pr-2" { "Fake actions" };
 
                             (boost_button(&path.fake_connection(), "Connect"));
-                            (boost_delete_button(&path.fake_connection(), "Disconnect"));
+                            (boost_button(&path.fake_connection_delete(), "Disconnect"));
                             (boost_button(&path.fake_seen(), "Seen"));
                         }
                     }
