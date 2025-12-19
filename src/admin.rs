@@ -26,6 +26,9 @@ use tower_http::{
 use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 use tracing::{info_span, warn};
 
+#[cfg(feature = "fake-data")]
+mod fake;
+
 use self::my_headers::HxTarget;
 use crate::{
     db::{ChargePoint, ChargePointOverview, Db, DbError},
@@ -81,29 +84,7 @@ pub(crate) fn router(config: &crate::Config) -> Router<super::AppState> {
 
     #[cfg(feature = "fake-data")]
     {
-        router = router
-            .route(
-                "/charge_points/{name}/fake/complete",
-                post(fake_complete_transaction),
-            )
-            .route(
-                "/charge_points/{name}/fake/start",
-                post(fake_start_transaction),
-            )
-            .route(
-                "/charge_points/{name}/fake/add_sample",
-                post(fake_add_sample),
-            )
-            .route("/charge_points/{name}/fake/end", post(fake_end_transaction))
-            .route(
-                "/charge_points/{name}/fake/connection",
-                post(fake_connection_create),
-            )
-            .route(
-                "/charge_points/{name}/fake/connection",
-                delete(fake_connection_delete),
-            )
-            .route("/charge_points/{name}/fake/seen", post(fake_seen));
+        router = router.nest("/charge_points/{name}/fake", fake::router());
     }
 
     let store = MemoryStore::default();
@@ -1422,137 +1403,6 @@ async fn charge_point_trigger(
     charge_point_flash(flash_responder, &name, flash).await
 }
 
-#[cfg(feature = "fake-data")]
-async fn fake_complete_transaction(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(db): State<Db>,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    db.fake_complete_transaction(&name)
-        .await
-        .context(FakeCompleteTransactionSnafu)?;
-    bus.transaction_sample_added(&*name);
-
-    Ok(charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Fake data has been created".into()),
-    )
-    .await)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_start_transaction(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(db): State<Db>,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    db.fake_start_transaction(&name)
-        .await
-        .context(FakeStartTransactionSnafu)?;
-    bus.transaction_sample_added(&*name);
-    Ok(charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Transaction started".into()),
-    )
-    .await)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_add_sample(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(db): State<Db>,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    db.fake_add_sample(&name)
-        .await
-        .context(FakeAddSampleSnafu)?;
-    bus.transaction_sample_added(&*name);
-    Ok(charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Sample added".into()),
-    )
-    .await)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_end_transaction(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(db): State<Db>,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    db.fake_end_transaction(&name)
-        .await
-        .context(FakeEndTransactionSnafu)?;
-    bus.transaction_sample_added(&*name);
-    Ok(charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Transaction ended".into()),
-    )
-    .await)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_connection_create(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    let flash = charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Charge point is connected".into()),
-    )
-    .await;
-
-    bus.charge_point_connection_changed(name, true);
-
-    Ok(flash)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_connection_delete(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    let flash = charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Charge point is disconnected".into()),
-    )
-    .await;
-
-    bus.charge_point_connection_changed(name, false);
-
-    Ok(flash)
-}
-
-#[cfg(feature = "fake-data")]
-async fn fake_seen(
-    Path(name): Path<String>,
-    flash_responder: FlashResponder,
-    State(bus): State<EventBus>,
-) -> Result<impl IntoResponse> {
-    let flash = charge_point_flash(
-        flash_responder,
-        &name,
-        Flash::Success("Charge point has been seen".into()),
-    )
-    .await;
-
-    bus.charge_point_seen(name);
-
-    Ok(flash)
-}
-
 async fn charge_point_flash(
     flash_responder: FlashResponder,
     name: &str,
@@ -1677,69 +1527,49 @@ where
 
 #[derive(Debug, Snafu)]
 enum Error {
-    Index {
-        source: DbError,
-    },
-    ChargePoint {
-        source: DbError,
-    },
-
-    #[cfg(feature = "fake-data")]
-    FakeCompleteTransaction {
-        source: DbError,
-    },
-
-    #[cfg(feature = "fake-data")]
-    FakeStartTransaction {
-        source: DbError,
-    },
-
-    #[cfg(feature = "fake-data")]
-    FakeAddSample {
-        source: DbError,
-    },
-
-    #[cfg(feature = "fake-data")]
-    FakeEndTransaction {
-        source: DbError,
-    },
+    Index { source: DbError },
+    ChargePoint { source: DbError },
 }
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        let chain = snafu::CleanedErrorText::new(&self).flat_map(|(_e, msg, _cleaned)| {
-            if msg.trim().is_empty() {
-                None
-            } else {
-                Some(msg)
-            }
-        });
-
-        let page = page(html! {
-            section."min-h-screen"."bg-red-200" {
-                h1."p-1"."bg-red-500" { "An error occurred" };
-
-                div."p-1" {
-                    ol."list-decimal"."list-inside" {
-                        @for msg in chain {
-                            li { (msg) };
-                        }
-                    };
-
-                    details."pt-4" {
-                        summary."cursor-pointer" { "Debug view" };
-                        pre."bg-slate-100"."p-2"."overflow-scroll" {
-                            code { (format!("{self:#?}")) };
-                        };
-                    }
-                }
-            };
-        });
-
-        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, page).into_response()
+        error_page(self)
     }
+}
+
+fn error_page(error: impl std::error::Error) -> axum::response::Response {
+    let chain = snafu::CleanedErrorText::new(&error).flat_map(|(_e, msg, _cleaned)| {
+        if msg.trim().is_empty() {
+            None
+        } else {
+            Some(msg)
+        }
+    });
+
+    let page = page(html! {
+        section."min-h-screen"."bg-red-200" {
+            h1."p-1"."bg-red-500" { "An error occurred" };
+
+            div."p-1" {
+                ol."list-decimal"."list-inside" {
+                    @for msg in chain {
+                        li { (msg) };
+                    }
+                };
+
+                details."pt-4" {
+                    summary."cursor-pointer" { "Debug view" };
+                    pre."bg-slate-100"."p-2"."overflow-scroll" {
+                        code { (format!("{error:#?}")) };
+                    };
+                }
+            }
+        };
+    });
+
+    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, page).into_response()
 }
 
 mod my_headers {
