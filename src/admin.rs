@@ -307,7 +307,7 @@ where
 {
     let id = id.into();
     html! {
-        table id=[id]."table-fixed"."w-full" {
+        table id=[id]."table-fixed"."w-full"."tabular-nums" {
             thead."bg-sky-700"."text-slate-200" {
                 tr { (head()) };
             };
